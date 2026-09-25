@@ -197,7 +197,9 @@ function RoomPage() {
     [roomId, token],
   );
 
-  // Reconcile the local player whenever the shared state changes.
+  // Reconcile the local player whenever the shared state changes, and again
+  // once a freshly mounted player is ready (a late joiner's player mounts after
+  // the shared state has already arrived).
   useEffect(() => {
     const player = playerRef.current;
     if (!state || !player?.controllable) return;

@@ -234,8 +234,13 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
       setVolume: (volume: number) => {
         volumeRef.current = volume;
         ytRef.current?.setVolume?.(volume * 100);
+        if (volume > 0) ytRef.current?.unMute?.();
         vimeoRef.current?.setVolume?.(volume).catch(() => {});
-        if (videoRef.current) videoRef.current.volume = volume;
+        if (volume > 0) vimeoRef.current?.setMuted?.(false)?.catch?.(() => {});
+        if (videoRef.current) {
+          videoRef.current.volume = volume;
+          if (volume > 0) videoRef.current.muted = false;
+        }
       },
     }),
     [sourceType],

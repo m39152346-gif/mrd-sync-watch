@@ -59,6 +59,7 @@ function RoomPage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [state, setState] = useState<PlayerState | null>(null);
   const [position, setPosition] = useState(0);
+  const [playerReady, setPlayerReady] = useState(0);
   const [duration, setDuration] = useState(0);
   const [copied, setCopied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);

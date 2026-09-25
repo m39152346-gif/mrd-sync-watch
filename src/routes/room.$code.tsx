@@ -214,7 +214,7 @@ function RoomPage() {
       applyingRef.current = false;
     }, 1200);
     return () => clearTimeout(timer);
-  }, [state, token]);
+  }, [state, token, playerReady]);
 
   // Drift correction while playing + UI ticker.
   useEffect(() => {

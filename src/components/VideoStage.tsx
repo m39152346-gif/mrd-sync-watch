@@ -191,6 +191,13 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceType, sourceRef]);
 
+  const mutedNoticeRef = useRef(false);
+  function notifyMuted() {
+    if (mutedNoticeRef.current) return;
+    mutedNoticeRef.current = true;
+    toast("Playing muted — raise the volume to hear it", { id: "autoplay-muted" });
+  }
+
   useImperativeHandle(
     handleRef,
     (): PlayerHandle => ({

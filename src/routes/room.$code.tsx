@@ -369,6 +369,7 @@ function RoomPage() {
             sourceType={sourceType}
             sourceRef={state?.source_ref ?? null}
             onLocalPlayPause={onLocalPlayPause}
+            onReady={() => setPlayerReady((n) => n + 1)}
           />
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Link2 className="size-3.5" />

@@ -1,0 +1,2 @@
+CREATE POLICY "room videos readable" ON storage.objects FOR SELECT TO anon, authenticated USING (bucket_id = 'room-videos');
+CREATE POLICY "room videos uploadable" ON storage.objects FOR INSERT TO anon, authenticated WITH CHECK (bucket_id = 'room-videos');

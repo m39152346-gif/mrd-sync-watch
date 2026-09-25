@@ -197,8 +197,19 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
       controllable: sourceType !== "other" && sourceType !== "none",
       play: () => {
         ytRef.current?.playVideo?.();
-        vimeoRef.current?.play?.().catch(() => {});
-        videoRef.current?.play().catch(() => {});
+        // Browsers block unmuted autoplay until the viewer interacts, so fall
+        // back to muted playback and let them unmute from the controls.
+        vimeoRef.current?.play?.().catch(() => {
+          vimeoRef.current?.setMuted?.(true);
+          vimeoRef.current?.play?.().catch(() => {});
+          notifyMuted();
+        });
+        videoRef.current?.play().catch(() => {
+          if (!videoRef.current) return;
+          videoRef.current.muted = true;
+          void videoRef.current.play().catch(() => {});
+          notifyMuted();
+        });
       },
       pause: () => {
         ytRef.current?.pauseVideo?.();

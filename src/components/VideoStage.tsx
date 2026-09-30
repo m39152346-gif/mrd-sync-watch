@@ -116,6 +116,26 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
     };
   }, [sourceType, sourceRef]);
 
+  // HLS (.m3u8) streams: native on Safari, hls.js elsewhere (loaded client-side only).
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!fileUrl || !video || !/\.m3u8(\?|#|$)/i.test(fileUrl)) return;
+    if (video.canPlayType("application/vnd.apple.mpegurl")) return;
+    let hls: { destroy: () => void } | null = null;
+    let cancelled = false;
+    void import("hls.js").then(({ default: Hls }) => {
+      if (cancelled || !Hls.isSupported()) return;
+      const instance = new Hls();
+      instance.loadSource(fileUrl);
+      instance.attachMedia(video);
+      hls = instance;
+    });
+    return () => {
+      cancelled = true;
+      hls?.destroy();
+    };
+  }, [fileUrl]);
+
   // YouTube IFrame player
   useEffect(() => {
     if (sourceType !== "youtube" || !sourceRef) return;

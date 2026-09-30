@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { detectSource, parseYouTubeId, SOURCE_LABEL, type SourceType } from "@/lib/sources";
 import { searchYouTube, type YouTubeResult } from "@/lib/youtube.functions";
+import { findVideosInPage, type FoundVideo } from "@/lib/extract.functions";
 
 type Props = {
   roomId: string;
@@ -17,6 +18,9 @@ type Props = {
 
 export function SourcePanel({ roomId, onPick }: Props) {
   const runSearch = useServerFn(searchYouTube);
+  const runFind = useServerFn(findVideosInPage);
+  const [finding, setFinding] = useState(false);
+  const [found, setFound] = useState<FoundVideo[]>([]);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<YouTubeResult[]>([]);
@@ -128,25 +132,79 @@ export function SourcePanel({ roomId, onPick }: Props) {
           <Input
             value={link}
             onChange={(event) => setLink(event.target.value)}
-            placeholder="Vimeo, .mp4/.webm file, or any other link"
+            placeholder="Any page with a video, Vimeo, .mp4/.m3u8 link…"
           />
           <Button
-            onClick={() => {
+            disabled={finding}
+            onClick={async () => {
               const detected = detectSource(link);
               if (!detected) {
                 toast.error("Paste a full link starting with https://");
                 return;
               }
-              onPick(detected.type, detected.ref, null);
-              toast.success(`Loaded as ${SOURCE_LABEL[detected.type]}`);
-              setLink("");
+              if (detected.type !== "other") {
+                onPick(detected.type, detected.ref, null);
+                toast.success(`Loaded as ${SOURCE_LABEL[detected.type]}`);
+                setLink("");
+                return;
+              }
+              setFinding(true);
+              setFound([]);
+              try {
+                const r = await runFind({ data: { url: detected.ref } });
+                setFound(r.videos);
+                if (r.videos.length === 0) {
+                  toast.message("No video found inside that page — embedding it directly.");
+                  onPick("other", detected.ref, null);
+                  setLink("");
+                }
+              } catch {
+                onPick("other", detected.ref, null);
+              } finally {
+                setFinding(false);
+              }
             }}
           >
-            Load
+            {finding ? <Loader2 className="size-4 animate-spin" /> : "Load"}
           </Button>
         </div>
+        {found.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium">Videos found on this page — pick one:</p>
+            {found.map((v) => (
+              <button
+                key={v.url}
+                type="button"
+                onClick={() => {
+                  const d = detectSource(v.url);
+                  const type: SourceType = v.kind === "hls" || v.kind === "file" ? "file" : (d?.type ?? "other");
+                  onPick(type, d && type === d.type ? d.ref : v.url, null);
+                  setFound([]);
+                  setLink("");
+                }}
+                className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-left text-xs hover:border-primary"
+              >
+                <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] uppercase text-accent-foreground">
+                  {v.kind === "hls" || v.kind === "file" ? "synced" : v.kind}
+                </span>
+                <span className="truncate">{v.url}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline"
+              onClick={() => {
+                onPick("other", link.trim(), null);
+                setFound([]);
+                setLink("");
+              }}
+            >
+              None of these — embed the whole page instead
+            </button>
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">
-          Vimeo and direct video files stay in sync. Other sites are embedded best-effort only.
+          Paste the page where the movie plays — SyncWatch looks for the real video inside it so everyone stays in sync.
         </p>
       </TabsContent>
 

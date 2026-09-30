@@ -372,7 +372,12 @@ function RoomPage() {
           variant="ghost"
           size="sm"
           className="ml-auto lg:hidden"
-          onClick={() => setChatOpen((open) => !open)}
+          onClick={() => {
+            setChatOpen((open) => {
+              if (!open) setTimeout(() => document.getElementById("room-sidebar")?.scrollIntoView({ behavior: "smooth" }), 50);
+              return !open;
+            });
+          }}
         >
           {chatOpen ? <X className="size-4" /> : <MessageSquare className="size-4" />}
           {chatOpen ? "Hide chat" : "Chat"}
@@ -408,6 +413,7 @@ function RoomPage() {
         </section>
 
         <aside
+          id="room-sidebar"
           className={`flex flex-col gap-3 lg:h-[calc(100vh-7rem)] ${chatOpen ? "" : "hidden lg:flex"}`}
         >
           <div className="rounded-xl border border-border bg-card p-3">

@@ -338,7 +338,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
             }}
             onPlay={() => onLocalPlayPause?.(true, videoRef.current?.currentTime ?? 0)}
             onPause={() => onLocalPlayPause?.(false, videoRef.current?.currentTime ?? 0)}
-            onError={() => setFileError("This video link could not be played.")}
+            onError={() => setFileError("This video could not be played. The link may be broken, blocked by its site, or in a format this browser can't play (try MP4 H.264 or WebM).")}
           />
         ) : (
           <div className="flex size-full items-center justify-center text-sm text-muted-foreground">

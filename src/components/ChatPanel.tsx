@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +66,13 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
     const body = draft.trim();
     if (!body) return;
     setDraft("");
-    await supabase.from("messages").insert({ room_id: roomId, display_name: displayName, color, body });
+    const { error } = await supabase
+      .from("messages")
+      .insert({ room_id: roomId, display_name: displayName, color, body: body.slice(0, 2000) });
+    if (error) {
+      setDraft(body);
+      toast.error("Message not sent. Check your connection and try again.");
+    }
   };
 
   return (

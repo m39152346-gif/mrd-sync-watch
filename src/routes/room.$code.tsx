@@ -274,7 +274,21 @@ function RoomPage() {
   };
 
   const copyInvite = async () => {
-    await navigator.clipboard.writeText(`${window.location.origin}/room/${code.toUpperCase()}`);
+    const url = `${window.location.origin}/room/${code.toUpperCase()}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = url;
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (!ok) {
+        toast.message(`Share this link: ${url}`);
+        return;
+      }
+    }
     setCopied(true);
     toast.success("Invite link copied");
     setTimeout(() => setCopied(false), 2000);

@@ -15,6 +15,13 @@
       "when": 1790365849436,
       "tag": "0001_room_videos_storage_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790787786167,
+      "tag": "0002_revoke_trigger_fn_exec",
+      "breakpoints": true
     }
   ]
 }

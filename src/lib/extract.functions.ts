@@ -17,8 +17,21 @@ function classify(url: string): FoundVideo["kind"] {
 export const findVideosInPage = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ url: z.string().url().max(2000) }).parse(d))
   .handler(async ({ data }): Promise<{ videos: FoundVideo[]; error: string | null }> => {
+    const target = new URL(data.url);
+    const host = target.hostname.toLowerCase();
+    if (
+      !/^https?:$/.test(target.protocol) ||
+      host === "localhost" ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal") ||
+      /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) ||
+      host.startsWith("[")
+    ) {
+      return { videos: [], error: "That address can't be opened." };
+    }
     try {
       const res = await fetch(data.url, {
+        signal: AbortSignal.timeout(12000),
         headers: { "User-Agent": "Mozilla/5.0 (compatible; SyncWatch/1.0)", Accept: "text/html,*/*" },
         redirect: "follow",
       });

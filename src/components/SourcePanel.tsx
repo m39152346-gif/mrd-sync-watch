@@ -45,6 +45,14 @@ export function SourcePanel({ roomId, onPick }: Props) {
   };
 
   const handleUpload = async (file: File) => {
+    if (!file.type.startsWith("video/")) {
+      toast.error("Please choose a video file.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024 * 1024) {
+      toast.error("That file is larger than 2 GB.");
+      return;
+    }
     setUploading(true);
     try {
       const ext = file.name.split(".").pop() ?? "mp4";

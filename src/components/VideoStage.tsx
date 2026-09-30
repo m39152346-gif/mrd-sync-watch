@@ -120,7 +120,10 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
   useEffect(() => {
     const video = videoRef.current;
     if (!fileUrl || !video || !/\.m3u8(\?|#|$)/i.test(fileUrl)) return;
-    if (video.canPlayType("application/vnd.apple.mpegurl")) return;
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = fileUrl;
+      return;
+    }
     let hls: { destroy: () => void } | null = null;
     let cancelled = false;
     void import("hls.js").then(({ default: Hls }) => {
@@ -326,7 +329,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
           <video
             key={fileUrl}
             ref={videoRef}
-            src={fileUrl}
+            src={/\.m3u8(\?|#|$)/i.test(fileUrl) ? undefined : fileUrl}
             className="size-full"
             playsInline
             onLoadedMetadata={() => {

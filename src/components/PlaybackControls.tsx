@@ -1,18 +1,34 @@
-import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import {
+  Maximize,
+  Minimize,
+  Pause,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  RotateCw,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { formatTime } from "@/lib/sources";
 
+export type SyncStatus = "synced" | "syncing" | "off";
+
 type Props = {
   isPlaying: boolean;
   position: number;
   duration: number;
   disabled?: boolean;
+  fullscreen: boolean;
+  syncStatus: SyncStatus;
   onTogglePlay: () => void;
   onSeek: (seconds: number) => void;
   onVolume: (volume: number) => void;
+  onFullscreen: () => void;
+  onSyncAll: () => void;
 };
 
 export function PlaybackControls({
@@ -20,12 +36,17 @@ export function PlaybackControls({
   position,
   duration,
   disabled,
+  fullscreen,
+  syncStatus,
   onTogglePlay,
   onSeek,
   onVolume,
+  onFullscreen,
+  onSyncAll,
 }: Props) {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const off = disabled ?? false;
 
   const applyVolume = (value: number) => {
     setVolume(value);
@@ -33,8 +54,15 @@ export function PlaybackControls({
     onVolume(value);
   };
 
+  const pill =
+    syncStatus === "synced"
+      ? { text: "In sync", cls: "bg-primary/15 text-primary", dot: "bg-primary" }
+      : syncStatus === "syncing"
+        ? { text: "Syncing…", cls: "bg-accent text-accent-foreground", dot: "bg-accent-foreground animate-pulse" }
+        : { text: "Sync unavailable", cls: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" };
+
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card/90 p-3 backdrop-blur">
       <div className="flex items-center gap-3">
         <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
           {formatTime(position)}
@@ -43,7 +71,7 @@ export function PlaybackControls({
           value={[Math.min(position, duration || position)]}
           max={duration || Math.max(position, 1)}
           step={1}
-          disabled={disabled ?? false}
+          disabled={off}
           onValueChange={(value) => onSeek(value[0] ?? 0)}
           aria-label="Seek"
         />
@@ -51,31 +79,44 @@ export function PlaybackControls({
           {formatTime(duration)}
         </span>
       </div>
-      <div className="flex items-center gap-3">
-        <Button size="icon" disabled={disabled} onClick={onTogglePlay} aria-label={isPlaying ? "Pause" : "Play"}>
-          {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <Button size="icon" variant="ghost" disabled={off} onClick={() => onSeek(Math.max(0, position - 10))} aria-label="Back 10 seconds">
+          <RotateCcw className="size-4" />
+        </Button>
+        <Button size="icon" className="size-11 rounded-full" disabled={off} onClick={onTogglePlay} aria-label={isPlaying ? "Pause" : "Play"}>
+          {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
+        </Button>
+        <Button size="icon" variant="ghost" disabled={off} onClick={() => onSeek(position + 10)} aria-label="Forward 10 seconds">
+          <RotateCw className="size-4" />
         </Button>
         <Button
           size="icon"
-          variant="secondary"
-          disabled={disabled}
+          variant="ghost"
+          disabled={off}
           aria-label={muted ? "Unmute" : "Mute"}
           onClick={() => (muted ? applyVolume(1) : applyVolume(0))}
         >
           {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
         </Button>
         <Slider
-          className="max-w-36"
+          className="hidden w-24 sm:flex"
           value={[muted ? 0 : volume]}
           max={1}
           step={0.05}
-          disabled={disabled ?? false}
+          disabled={off}
           onValueChange={(value) => applyVolume(value[0] ?? 0)}
           aria-label="Volume"
         />
-        <span className="ml-auto text-xs text-muted-foreground">
-          {disabled ? "Playback sync unavailable" : "Everyone stays in sync"}
+        <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`}>
+          <span className={`size-1.5 rounded-full ${pill.dot}`} />
+          {pill.text}
         </span>
+        <Button size="icon" variant="ghost" disabled={off} onClick={onSyncAll} aria-label="Bring everyone to my position" title="Bring everyone to my position">
+          <RefreshCw className="size-4" />
+        </Button>
+        <Button size="icon" variant="ghost" onClick={onFullscreen} aria-label={fullscreen ? "Exit full screen" : "Full screen"}>
+          {fullscreen ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
+        </Button>
       </div>
     </div>
   );

@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import * as tus from "tus-js-client";
 import { useServerFn } from "@tanstack/react-start";
-import { Loader2, Search, Upload } from "lucide-react";
+import { Film, Loader2, Pause, Play, Search, Upload, X } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
-import { detectSource, parseYouTubeId, SOURCE_LABEL, type SourceType } from "@/lib/sources";
+import { unwrapEmbedCode, detectSource, parseYouTubeId, SOURCE_LABEL, type SourceType } from "@/lib/sources";
 import { searchYouTube, type YouTubeResult } from "@/lib/youtube.functions";
 import { findVideosInPage, type FoundVideo } from "@/lib/extract.functions";
 
@@ -15,6 +17,8 @@ type Props = {
   roomId: string;
   onPick: (type: SourceType, ref: string, title: string | null) => void;
 };
+
+const VIDEO_EXT = ["mp4", "webm", "mov", "m4v", "mkv", "3gp", "ogv", "ogg", "avi", "wmv", "flv", "ts", "mpeg", "mpg"];
 
 export function SourcePanel({ roomId, onPick }: Props) {
   const runSearch = useServerFn(searchYouTube);
@@ -44,30 +48,93 @@ export function SourcePanel({ roomId, onPick }: Props) {
     }
   };
 
+  const [progress, setProgress] = useState(0);
+  const [speed, setSpeed] = useState("");
+  const [paused, setPaused] = useState(false);
+  const [library, setLibrary] = useState<{ path: string; label: string }[]>([]);
+  const uploadRef = useRef<tus.Upload | null>(null);
+
+  const loadLibrary = async () => {
+    const { data } = await supabase.storage.from("room-videos").list(roomId, {
+      limit: 50,
+      sortBy: { column: "created_at", order: "desc" },
+    });
+    setLibrary(
+      (data ?? [])
+        .filter((f) => f.name && !f.name.startsWith("."))
+        .map((f) => ({ path: `${roomId}/${f.name}`, label: f.name.split("__").slice(1).join("__") || f.name })),
+    );
+  };
+  useEffect(() => {
+    void loadLibrary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+
   const handleUpload = async (file: File) => {
-    if (!file.type.startsWith("video/")) {
-      toast.error("Please choose a video file.");
+    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+    if (!file.type.startsWith("video/") && !VIDEO_EXT.includes(ext)) {
+      toast.error("Please choose a video file (MP4, WebM, MOV, MKV, M4V, 3GP…).");
       return;
     }
     if (file.size > 2 * 1024 * 1024 * 1024) {
       toast.error("That file is larger than 2 GB.");
       return;
     }
-    setUploading(true);
-    try {
-      const ext = file.name.split(".").pop() ?? "mp4";
-      const path = `${roomId}/${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage.from("room-videos").upload(path, file, {
-        contentType: file.type || "video/mp4",
-      });
-      if (error) throw error;
-      onPick("upload", path, file.name);
-      toast.success("Upload ready — everyone streams from this file.");
-    } catch {
-      toast.error("Upload failed. Try a smaller file.");
-    } finally {
-      setUploading(false);
+    const probe = document.createElement("video");
+    const mime = file.type || `video/${ext === "mov" ? "quicktime" : ext}`;
+    if (!probe.canPlayType(mime) && ["avi", "wmv", "flv", "mkv"].includes(ext)) {
+      toast.warning("This format may not play in every browser. MP4 (H.264) works everywhere.");
     }
+    // Same file → same name, so a re-pick after leaving resumes instead of restarting.
+    const safe = file.name.replace(/[^\w.\-]+/g, "_").slice(-80);
+    const path = `${roomId}/${file.size.toString(36)}${file.lastModified.toString(36)}__${safe}`;
+    const existing = library.find((item) => item.path === path);
+    if (existing) {
+      onPick("upload", path, file.name);
+      toast.success("Already uploaded — playing it right away.");
+      return;
+    }
+    const { data: session } = await supabase.auth.getSession();
+    const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+    const headers: Record<string, string> = { apikey: key, "x-upsert": "true" };
+    if (session.session) headers["authorization"] = `Bearer ${session.session.access_token}`;
+    setUploading(true);
+    setPaused(false);
+    setProgress(0);
+    const started = Date.now();
+    const upload = new tus.Upload(file, {
+      endpoint: `${import.meta.env.VITE_SUPABASE_URL as string}/storage/v1/upload/resumable`,
+      retryDelays: [0, 1000, 3000, 5000, 10000],
+      headers,
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      chunkSize: 6 * 1024 * 1024,
+      metadata: { bucketName: "room-videos", objectName: path, contentType: mime, cacheControl: "3600" },
+      onProgress: (sent, total) => {
+        setProgress(Math.round((sent / total) * 100));
+        const secs = (Date.now() - started) / 1000;
+        if (secs > 1) setSpeed(`${(sent / secs / 1024 / 1024).toFixed(1)} MB/s`);
+      },
+      onError: () => {
+        setUploading(false);
+        uploadRef.current = null;
+        toast.error("Upload stopped. Pick the same file again to continue where it left off.");
+      },
+      onSuccess: () => {
+        setUploading(false);
+        uploadRef.current = null;
+        onPick("upload", path, file.name);
+        void loadLibrary();
+        toast.success("Upload ready — everyone streams from this file.");
+      },
+    });
+    uploadRef.current = upload;
+    const previous = await upload.findPreviousUploads();
+    if (previous[0]) {
+      upload.resumeFromPreviousUpload(previous[0]);
+      toast.message("Continuing your earlier upload…");
+    }
+    upload.start();
   };
 
   return (
@@ -140,12 +207,12 @@ export function SourcePanel({ roomId, onPick }: Props) {
           <Input
             value={link}
             onChange={(event) => setLink(event.target.value)}
-            placeholder="Any page with a video, Vimeo, .mp4/.m3u8 link…"
+            placeholder="Page link, iframe embed code, Aparat, Vimeo, .mp4/.m3u8…"
           />
           <Button
             disabled={finding}
             onClick={async () => {
-              const detected = detectSource(link);
+              const detected = detectSource(unwrapEmbedCode(link));
               if (!detected) {
                 toast.error("Paste a full link starting with https://");
                 return;
@@ -160,6 +227,13 @@ export function SourcePanel({ roomId, onPick }: Props) {
               setFound([]);
               try {
                 const r = await runFind({ data: { url: detected.ref } });
+                const synced = r.videos.find((v) => v.kind === "hls" || v.kind === "file");
+                if (synced && /aparat\.com/i.test(detected.ref)) {
+                  onPick("file", synced.url, null);
+                  toast.success("Found the real video — everyone stays in sync.");
+                  setLink("");
+                  return;
+                }
                 setFound(r.videos);
                 if (r.videos.length === 0) {
                   toast.message("No video found inside that page — embedding it directly.");
@@ -202,7 +276,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
               type="button"
               className="text-xs text-muted-foreground underline"
               onClick={() => {
-                onPick("other", link.trim(), null);
+                onPick("other", unwrapEmbedCode(link), null);
                 setFound([]);
                 setLink("");
               }}
@@ -216,29 +290,79 @@ export function SourcePanel({ roomId, onPick }: Props) {
         </p>
       </TabsContent>
 
-      <TabsContent value="upload" className="mt-3 space-y-2">
-        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-surface px-4 py-6 text-sm text-muted-foreground hover:border-primary">
-          {uploading ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Upload className="size-4" />
-          )}
-          {uploading ? "Uploading…" : "Choose a video file"}
-          <input
-            type="file"
-            accept="video/*"
-            className="hidden"
-            disabled={uploading}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void handleUpload(file);
-              event.target.value = "";
-            }}
-          />
-        </label>
-        <p className="text-xs text-muted-foreground">
-          Stored in the room's library so every participant streams the same file.
-        </p>
+      <TabsContent value="upload" className="mt-3 space-y-3">
+        {uploading ? (
+          <div className="space-y-2 rounded-lg border border-border bg-surface p-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium">{paused ? "Paused" : "Uploading…"} {progress}%</span>
+              <span className="text-muted-foreground">{speed}</span>
+            </div>
+            <Progress value={progress} />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  if (paused) uploadRef.current?.start();
+                  else void uploadRef.current?.abort();
+                  setPaused(!paused);
+                }}
+              >
+                {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
+                {paused ? "Resume" : "Pause"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void uploadRef.current?.abort(true);
+                  uploadRef.current = null;
+                  setUploading(false);
+                }}
+              >
+                <X className="size-3.5" /> Cancel
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              If you leave, pick the same file again later — the upload continues where it stopped.
+            </p>
+          </div>
+        ) : (
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-surface px-4 py-6 text-sm text-muted-foreground hover:border-primary">
+            <span className="flex items-center gap-2 text-foreground">
+              <Upload className="size-4" /> Choose a video from your phone or computer
+            </span>
+            <span className="text-[11px]">MP4, MOV, WebM, MKV, M4V, 3GP · up to 2 GB · resumable</span>
+            <input
+              type="file"
+              accept="video/*,.mkv,.mov,.m4v,.3gp,.webm,.avi,.ts"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void handleUpload(file);
+                event.target.value = "";
+              }}
+            />
+          </label>
+        )}
+        {library.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium">Room library — no need to upload again</p>
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {library.map((item) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => onPick("upload", item.path, item.label)}
+                  className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-left text-xs hover:border-primary"
+                >
+                  <Film className="size-3.5 shrink-0 text-primary" />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </TabsContent>
     </Tabs>
   );

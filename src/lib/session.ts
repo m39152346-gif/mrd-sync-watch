@@ -52,3 +52,41 @@ export function initials(name: string): string {
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
 }
+
+const RECENT_KEY = "syncwatch.recent_rooms";
+export type RecentRoom = { code: string; at: number };
+
+export function getRecentRooms(): RecentRoom[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as RecentRoom[];
+    return Array.isArray(list) ? list.slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addRecentRoom(code: string) {
+  try {
+    const list = getRecentRooms().filter((r) => r.code !== code);
+    localStorage.setItem(RECENT_KEY, JSON.stringify([{ code, at: Date.now() }, ...list].slice(0, 5)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Remembers the last local playback spot per room so a rejoin resumes there. */
+export function savePlaybackSpot(roomId: string, ref: string, seconds: number) {
+  try {
+    localStorage.setItem(`syncwatch.spot.${roomId}`, JSON.stringify({ ref, seconds }));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getPlaybackSpot(roomId: string): { ref: string; seconds: number } | null {
+  try {
+    return JSON.parse(localStorage.getItem(`syncwatch.spot.${roomId}`) ?? "null");
+  } catch {
+    return null;
+  }
+}

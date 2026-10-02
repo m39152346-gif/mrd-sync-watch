@@ -12,6 +12,8 @@ export type PlayerHandle = {
   getTime: () => number;
   getDuration: () => number;
   setVolume: (volume: number) => void;
+  /** Gentle speed nudge for smooth drift correction (HTML5 video only). */
+  setRate: (rate: number) => boolean;
   controllable: boolean;
 };
 
@@ -262,6 +264,12 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
         if (sourceType === "vimeo") return vimeoDurationRef.current;
         return videoRef.current?.duration ?? 0;
       },
+      setRate: (rate: number) => {
+        const video = videoRef.current;
+        if (!video) return false;
+        if (Math.abs(video.playbackRate - rate) > 0.01) video.playbackRate = rate;
+        return true;
+      },
       setVolume: (volume: number) => {
         volumeRef.current = volume;
         ytRef.current?.setVolume?.(volume * 100);
@@ -332,6 +340,8 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
             src={/\.m3u8(\?|#|$)/i.test(fileUrl) ? undefined : fileUrl}
             className="size-full"
             playsInline
+            preload="auto"
+            onDoubleClick={(e) => e.preventDefault()}
             onLoadedMetadata={() => {
               if (videoRef.current) videoRef.current.volume = volumeRef.current;
               onReady?.();

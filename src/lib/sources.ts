@@ -15,7 +15,7 @@ export type PlayerState = {
   updated_by: string | null;
 };
 
-const FILE_EXT = /\.(mp4|webm|ogg|ogv|mov|m4v|mkv|m3u8)(\?|#|$)/i;
+const FILE_EXT = /\.(mp4|webm|ogg|ogv|mov|m4v|mkv|3gp|m3u8)(\?|#|$)/i;
 
 export function parseYouTubeId(input: string): string | null {
   const trimmed = input.trim();
@@ -52,7 +52,7 @@ export function parseVimeoId(input: string): string | null {
 
 /** Classifies a pasted link into one of the Phase 1 source types. */
 export function detectSource(input: string): { type: SourceType; ref: string } | null {
-  const value = input.trim();
+  const value = unwrapEmbedCode(input);
   if (!value) return null;
   const yt = parseYouTubeId(value);
   if (yt) return { type: "youtube", ref: yt };
@@ -72,10 +72,30 @@ export const SOURCE_LABEL: Record<SourceType, string> = {
   other: "Embedded link",
 };
 
+let clockOffset = 0;
+/** Server-aligned "now" so viewers with wrong phone clocks still line up. */
+export function serverNow() {
+  return Date.now() + clockOffset;
+}
+/** Learns the offset from a write round-trip whose timestamp the server set. */
+export function learnClockOffset(serverIso: string, sentAt: number, receivedAt: number) {
+  const server = new Date(serverIso).getTime();
+  if (!Number.isFinite(server)) return;
+  const sample = server - (sentAt + receivedAt) / 2;
+  clockOffset = clockOffset === 0 ? sample : clockOffset * 0.6 + sample * 0.4;
+}
+
+/** Pulls the src out of a pasted <iframe ...> embed code; returns the input otherwise. */
+export function unwrapEmbedCode(input: string) {
+  const match = input.match(/src=["']([^"']+)["']/i);
+  const value = (match?.[1] ?? input).trim();
+  return value.startsWith("//") ? `https:${value}` : value;
+}
+
 /** Computes where a client should be right now, given the shared state. */
 export function expectedPosition(state: Pick<PlayerState, "is_playing" | "position_seconds" | "updated_at">) {
   if (!state.is_playing) return state.position_seconds;
-  const elapsed = (Date.now() - new Date(state.updated_at).getTime()) / 1000;
+  const elapsed = (serverNow() - new Date(state.updated_at).getTime()) / 1000;
   return state.position_seconds + Math.max(0, elapsed);
 }
 

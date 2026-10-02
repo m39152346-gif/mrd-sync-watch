@@ -95,7 +95,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
       return;
     }
     const { data: session } = await supabase.auth.getSession();
-    const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+    const key = import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY'] as string;
     const headers: Record<string, string> = { apikey: key, "x-upsert": "true" };
     if (session.session) headers["authorization"] = `Bearer ${session.session.access_token}`;
     setUploading(true);
@@ -103,7 +103,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
     setProgress(0);
     const started = Date.now();
     const upload = new tus.Upload(file, {
-      endpoint: `${import.meta.env.VITE_SUPABASE_URL as string}/storage/v1/upload/resumable`,
+      endpoint: `${import.meta.env['VITE_SUPABASE_URL'] as string}/storage/v1/upload/resumable`,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       headers,
       uploadDataDuringCreation: true,

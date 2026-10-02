@@ -408,6 +408,19 @@ function RoomPage() {
             onTogglePlay={togglePlay}
             onSeek={handleSeek}
             onVolume={(volume) => playerRef.current?.setVolume(volume)}
+            fullscreen={false}
+            syncStatus={sourceType === "none" || sourceType === "other" ? "off" : "synced"}
+            onFullscreen={() => {
+              const el = document.querySelector("video, iframe");
+              if (document.fullscreenElement) void document.exitFullscreen();
+              else void el?.requestFullscreen?.().catch(() => {});
+            }}
+            onSyncAll={() =>
+              void publish({
+                position_seconds: playerRef.current?.getTime() ?? 0,
+                is_playing: state?.is_playing ?? false,
+              })
+            }
           />
           <SourcePanel roomId={roomId} onPick={pickSource} />
         </section>

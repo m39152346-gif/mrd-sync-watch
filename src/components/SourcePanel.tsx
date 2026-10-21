@@ -12,13 +12,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { unwrapEmbedCode, detectSource, parseYouTubeId, SOURCE_LABEL, type SourceType } from "@/lib/sources";
 import { searchYouTube, type YouTubeResult } from "@/lib/youtube.functions";
 import { findVideosInPage, type FoundVideo } from "@/lib/extract.functions";
+import { uploadPath, videoUploadError } from "@/lib/uploads";
 
 type Props = {
   roomId: string;
   onPick: (type: SourceType, ref: string, title: string | null) => void;
 };
-
-const VIDEO_EXT = ["mp4", "webm", "mov", "m4v", "mkv", "3gp", "ogv", "ogg", "avi", "wmv", "flv", "ts", "mpeg", "mpg"];
 
 export function SourcePanel({ roomId, onPick }: Props) {
   const runSearch = useServerFn(searchYouTube);
@@ -67,17 +66,20 @@ export function SourcePanel({ roomId, onPick }: Props) {
   };
   useEffect(() => {
     void loadLibrary();
+    const timer = setInterval(() => void loadLibrary(), 15000);
+    return () => {
+      clearInterval(timer);
+      void uploadRef.current?.abort();
+      uploadRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
   const handleUpload = async (file: File) => {
     const ext = (file.name.split(".").pop() ?? "").toLowerCase();
-    if (!file.type.startsWith("video/") && !VIDEO_EXT.includes(ext)) {
-      toast.error("Please choose a video file (MP4, WebM, MOV, MKV, M4V, 3GP…).");
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024 * 1024) {
-      toast.error("That file is larger than 2 GB.");
+    const validationError = videoUploadError(file);
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
     const probe = document.createElement("video");
@@ -86,8 +88,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
       toast.warning("This format may not play in every browser. MP4 (H.264) works everywhere.");
     }
     // Same file → same name, so a re-pick after leaving resumes instead of restarting.
-    const safe = file.name.replace(/[^\w.\-]+/g, "_").slice(-80);
-    const path = `${roomId}/${file.size.toString(36)}${file.lastModified.toString(36)}__${safe}`;
+    const path = uploadPath(roomId, file);
     const existing = library.find((item) => item.path === path);
     if (existing) {
       onPick("upload", path, file.name);
@@ -106,6 +107,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
       endpoint: `${import.meta.env['VITE_SUPABASE_URL'] as string}/storage/v1/upload/resumable`,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       headers,
+      fingerprint: async () => `syncwatch:${path}`,
       uploadDataDuringCreation: true,
       removeFingerprintOnSuccess: true,
       chunkSize: 6 * 1024 * 1024,
@@ -129,12 +131,18 @@ export function SourcePanel({ roomId, onPick }: Props) {
       },
     });
     uploadRef.current = upload;
-    const previous = await upload.findPreviousUploads();
-    if (previous[0]) {
-      upload.resumeFromPreviousUpload(previous[0]);
-      toast.message("Continuing your earlier upload…");
+    try {
+      const previous = await upload.findPreviousUploads();
+      if (previous[0]) {
+        upload.resumeFromPreviousUpload(previous[0]);
+        toast.message("Continuing your earlier upload…");
+      }
+      upload.start();
+    } catch {
+      setUploading(false);
+      uploadRef.current = null;
+      toast.error("Upload could not start. Please select the file again.");
     }
-    upload.start();
   };
 
   return (
@@ -158,7 +166,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search YouTube…"
           />
-          <Button type="submit" disabled={searching}>
+          <Button type="submit" disabled={searching} aria-label="Search YouTube">
             {searching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
           </Button>
         </form>
@@ -228,7 +236,8 @@ export function SourcePanel({ roomId, onPick }: Props) {
               try {
                 const r = await runFind({ data: { url: detected.ref } });
                 const synced = r.videos.find((v) => v.kind === "hls" || v.kind === "file");
-                if (synced && /aparat\.com/i.test(detected.ref)) {
+                const host = new URL(detected.ref).hostname;
+                if (synced && (host === "aparat.com" || host.endsWith(".aparat.com"))) {
                   onPick("file", synced.url, null);
                   toast.success("Found the real video — everyone stays in sync.");
                   setLink("");
@@ -236,11 +245,12 @@ export function SourcePanel({ roomId, onPick }: Props) {
                 }
                 setFound(r.videos);
                 if (r.videos.length === 0) {
-                  toast.message("No video found inside that page — embedding it directly.");
+                  toast.message(r.error ?? "No controllable video found — embedding without sync.");
                   onPick("other", detected.ref, null);
                   setLink("");
                 }
               } catch {
+                toast.message("The page could not be checked — embedding without sync.");
                 onPick("other", detected.ref, null);
               } finally {
                 setFinding(false);
@@ -302,10 +312,10 @@ export function SourcePanel({ roomId, onPick }: Props) {
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={() => {
+                onClick={async () => {
                   if (paused) uploadRef.current?.start();
-                  else void uploadRef.current?.abort();
-                  setPaused(!paused);
+                  else await uploadRef.current?.abort();
+                  setPaused((value) => !value);
                 }}
               >
                 {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
@@ -314,8 +324,8 @@ export function SourcePanel({ roomId, onPick }: Props) {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => {
-                  void uploadRef.current?.abort(true);
+                onClick={async () => {
+                  await uploadRef.current?.abort(true).catch(() => {});
                   uploadRef.current = null;
                   setUploading(false);
                 }}
@@ -335,7 +345,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
             <span className="text-[11px]">MP4, MOV, WebM, MKV, M4V, 3GP · up to 2 GB · resumable</span>
             <input
               type="file"
-              accept="video/*,.mkv,.mov,.m4v,.3gp,.webm,.avi,.ts"
+              accept="video/*,.mp4,.mkv,.mov,.m4v,.3gp,.webm,.avi,.ts,.ogg,.ogv,.wmv,.flv,.mpeg,.mpg"
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0];

@@ -76,7 +76,7 @@ export function PlaybackControls({
           aria-label="Seek"
         />
         <span className="w-12 shrink-0 text-xs tabular-nums text-muted-foreground">
-          {formatTime(duration)}
+          {Number.isFinite(duration) ? formatTime(duration) : "Live"}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -86,7 +86,7 @@ export function PlaybackControls({
         <Button size="icon" className="size-11 rounded-full" disabled={off} onClick={onTogglePlay} aria-label={isPlaying ? "Pause" : "Play"}>
           {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
         </Button>
-        <Button size="icon" variant="ghost" disabled={off} onClick={() => onSeek(position + 10)} aria-label="Forward 10 seconds">
+        <Button size="icon" variant="ghost" disabled={off} onClick={() => onSeek(Math.min(Number.isFinite(duration) && duration > 0 ? duration : position + 10, position + 10))} aria-label="Forward 10 seconds">
           <RotateCw className="size-4" />
         </Button>
         <Button

@@ -41,7 +41,7 @@ export function setStoredName(name: string) {
 export function colorForToken(token: string): string {
   let hash = 0;
   for (let i = 0; i < token.length; i++) hash = (hash * 31 + token.charCodeAt(i)) | 0;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? AVATAR_COLORS[0]!;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#22d3ee";
 }
 
 export function initials(name: string): string {

@@ -63,10 +63,10 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
       .from("messages")
       .select("id, display_name, color, body, created_at")
       .eq("room_id", roomId)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(200)
       .then(({ data }) => {
-        if (active && data) setMessages(data as Message[]);
+        if (active && data) setMessages(data.reverse() as Message[]);
       });
 
     const channel = supabase

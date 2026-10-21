@@ -72,6 +72,18 @@ export const findVideosInPage = createServerFn({ method: "POST" })
     if (!target) {
       return { videos: [], error: "That address can't be opened." };
     }
+    // Resolve through a fixed public DNS endpoint before fetching an arbitrary
+    // page. Reject private/IPv6 answers; redirects are disabled below.
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(target.hostname)) {
+      try {
+        const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(target.hostname)}&type=A`, {
+          headers: { Accept: "application/dns-json" }, signal: AbortSignal.timeout(4000), redirect: "error",
+        });
+        const dns = await response.json() as { Answer?: { type: number; data: string }[] };
+        const ips = dns.Answer?.filter((answer) => answer.type === 1) ?? [];
+        if (!ips.length || ips.some((answer) => !publicVideoUrl(`https://${answer.data}`))) return { videos: [], error: "That address can't be opened." };
+      } catch { return { videos: [], error: "The page address could not be verified. Try again later." }; }
+    }
     if (aparatHash(target)) {
       const aparat = await resolveAparat(target);
       if (aparat.length) return { videos: sortVideos(aparat), error: null };

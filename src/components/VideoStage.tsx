@@ -129,12 +129,14 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
     let hls: { destroy: () => void } | null = null;
     let cancelled = false;
     void import("hls.js").then(({ default: Hls }) => {
-      if (cancelled || !Hls.isSupported()) return;
+      if (cancelled) return;
+      if (!Hls.isSupported()) { setFileError("This browser cannot play this stream."); return; }
       const instance = new Hls();
+      instance.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) setFileError("This stream could not be loaded. Try another video link."); });
       instance.loadSource(fileUrl);
       instance.attachMedia(video);
       hls = instance;
-    });
+    }).catch(() => { if (!cancelled) setFileError("The stream player could not load."); });
     return () => {
       cancelled = true;
       hls?.destroy();
@@ -167,7 +169,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
           },
         },
       });
-    })();
+    })().catch(() => setFileError("YouTube could not be loaded. Check your connection."));
     return () => {
       destroyed = true;
       try {
@@ -204,7 +206,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
         player.setVolume(volumeRef.current);
         onReady?.();
       });
-    })();
+    })().catch(() => setFileError("Vimeo could not be loaded. Check your connection."));
     return () => {
       destroyed = true;
       try {
@@ -348,6 +350,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
             }}
             onPlay={() => onLocalPlayPause?.(true, videoRef.current?.currentTime ?? 0)}
             onPause={() => onLocalPlayPause?.(false, videoRef.current?.currentTime ?? 0)}
+            onEnded={() => onLocalPlayPause?.(false, videoRef.current?.currentTime ?? 0)}
             onError={() => setFileError("This video could not be played. The link may be broken, blocked by its site, or in a format this browser can't play (try MP4 H.264 or WebM).")}
           />
         ) : (
@@ -361,6 +364,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
 
   return (
     <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
+      {fileError && <p className="p-4 text-sm text-muted-foreground">{fileError}</p>}
       <div key={`${sourceType}-${sourceRef}`} className="size-full [&>iframe]:size-full">
         <div ref={mountRef} className="size-full" />
       </div>

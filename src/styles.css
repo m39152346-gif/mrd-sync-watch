@@ -36,6 +36,7 @@
   --color-ring: var(--ring);
   --color-ring-offset-background: var(--background);
   --color-surface: var(--surface);
+  --color-media: var(--media);
   --color-surface-foreground: var(--surface-foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -51,6 +52,7 @@
 
 :root {
   --radius: 0.75rem;
+  --media: oklch(0.08 0 0);
   --background: oklch(0.17 0.022 264);
   --foreground: oklch(0.97 0.006 250);
   --card: oklch(0.216 0.024 264);

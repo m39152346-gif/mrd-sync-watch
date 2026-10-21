@@ -6,6 +6,7 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -35,7 +36,8 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error: caught, reset }: ErrorComponentProps) {
+  const error = caught instanceof Error ? caught : new Error("The page could not load.");
   console.error(error);
   const router = useRouter();
   useEffect(() => {

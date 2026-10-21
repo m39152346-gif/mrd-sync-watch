@@ -6,12 +6,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
-import { colorForToken, getSessionToken, getStoredName, setStoredName } from "@/lib/session";
+import { colorForToken, getSessionToken, getStoredName, setStoredName, getRecentRooms, type RecentRoom } from "@/lib/session";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "SyncWatch — Watch videos together, in sync" },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       {
         name: "description",
         content:
@@ -42,8 +44,9 @@ function Landing() {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
+  const [recent, setRecent] = useState<RecentRoom[]>([]);
 
-  useEffect(() => setName(getStoredName()), []);
+  useEffect(() => { setName(getStoredName()); setRecent(getRecentRooms()); }, []);
 
   const requireName = () => {
     if (!name.trim()) {
@@ -77,14 +80,16 @@ function Landing() {
         }
       }
       if (!roomId) throw new Error("no room");
-      await supabase.from("player_state").insert({ room_id: roomId });
-      await supabase.from("participants").insert({
+      const { error: stateError } = await supabase.from("player_state").insert({ room_id: roomId });
+      if (stateError) throw stateError;
+      const { error: participantError } = await supabase.from("participants").insert({
         room_id: roomId,
         session_token: token,
         display_name: name.trim(),
         color: colorForToken(token),
         is_host: true,
       });
+      if (participantError) throw participantError;
       navigate({ to: "/room/$code", params: { code: roomCode } });
     } catch {
       toast.error("Could not create the room. Please try again.");
@@ -164,6 +169,10 @@ function Landing() {
           </div>
         </div>
 
+        {recent.length > 0 && <section className="space-y-2">
+          <h2 className="text-xs font-medium text-muted-foreground">Recent rooms</h2>
+          <div className="flex flex-wrap gap-2">{recent.map((room) => <Button key={room.code} asChild variant="secondary" size="sm"><Link to="/room/$code" params={{ code: room.code }}>{room.code}</Link></Button>)}</div>
+        </section>}
         <p className="text-center text-xs text-muted-foreground">
           Want to keep your name across devices?{" "}
           <Link to="/auth" className="text-primary underline-offset-2 hover:underline">

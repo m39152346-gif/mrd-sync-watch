@@ -46,9 +46,12 @@ export function PlaybackControls({
 }: Props) {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [savedVolume, setSavedVolume] = useState(1);
   const off = disabled ?? false;
+  const seekable = Number.isFinite(duration) && duration > 0;
 
   const applyVolume = (value: number) => {
+    if (value > 0) setSavedVolume(value);
     setVolume(value);
     setMuted(value === 0);
     onVolume(value);
@@ -68,15 +71,15 @@ export function PlaybackControls({
           {formatTime(position)}
         </span>
         <Slider
-          value={[Math.min(position, duration || position)]}
-          max={duration || Math.max(position, 1)}
+          value={[seekable ? Math.min(position, duration) : 0]}
+          max={seekable ? duration : 1}
           step={1}
-          disabled={off}
+          disabled={off || !seekable}
           onValueChange={(value) => onSeek(value[0] ?? 0)}
           aria-label="Seek"
         />
         <span className="w-12 shrink-0 text-xs tabular-nums text-muted-foreground">
-          {formatTime(duration)}
+          {duration === Infinity ? "Live" : seekable ? formatTime(duration) : "—"}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -86,7 +89,7 @@ export function PlaybackControls({
         <Button size="icon" className="size-11 rounded-full" disabled={off} onClick={onTogglePlay} aria-label={isPlaying ? "Pause" : "Play"}>
           {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
         </Button>
-        <Button size="icon" variant="ghost" disabled={off} onClick={() => onSeek(position + 10)} aria-label="Forward 10 seconds">
+        <Button size="icon" variant="ghost" disabled={off} onClick={() => onSeek(Math.min(Number.isFinite(duration) && duration > 0 ? duration : position + 10, position + 10))} aria-label="Forward 10 seconds">
           <RotateCw className="size-4" />
         </Button>
         <Button
@@ -94,7 +97,7 @@ export function PlaybackControls({
           variant="ghost"
           disabled={off}
           aria-label={muted ? "Unmute" : "Mute"}
-          onClick={() => (muted ? applyVolume(1) : applyVolume(0))}
+          onClick={() => (muted ? applyVolume(savedVolume) : applyVolume(0))}
         >
           {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
         </Button>

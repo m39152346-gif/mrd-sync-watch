@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { aparatHash, publicVideoUrl } from "./public-video-url";
 
 export type FoundVideo = { url: string; kind: "file" | "hls" | "youtube" | "vimeo" | "embed" };
 
@@ -20,12 +21,27 @@ function classify(url: string): FoundVideo["kind"] {
 
 const UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Mobile Safari/537.36";
 
+async function boundedText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  try {
+    while (bytes < 3_000_000) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 3_000_000) throw new Error("Page too large");
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally { await reader.cancel(); }
+}
+
 /** Aparat exposes the real stream behind its embed frame through its public API. */
 async function resolveAparat(url: URL): Promise<FoundVideo[]> {
-  const hash =
-    url.pathname.match(/videohash\/([A-Za-z0-9]+)/)?.[1] ??
-    url.pathname.match(/\/v\/([A-Za-z0-9]+)/)?.[1] ??
-    url.searchParams.get("videohash");
+  const hash = aparatHash(url);
   if (!hash) return [];
   const out: FoundVideo[] = [];
   const endpoints = [
@@ -34,9 +50,9 @@ async function resolveAparat(url: URL): Promise<FoundVideo[]> {
   ];
   for (const endpoint of endpoints) {
     try {
-      const res = await fetch(endpoint, { signal: AbortSignal.timeout(8000), headers: { "User-Agent": UA, Accept: "application/json" } });
+      const res = await fetch(endpoint, { redirect: "error", signal: AbortSignal.timeout(8000), headers: { "User-Agent": UA, Accept: "application/json" } });
       if (!res.ok) continue;
-      const text = (await res.text()).replace(/\\\//g, "/");
+      const text = (await boundedText(res)).replace(/\\\//g, "/");
       for (const m of text.matchAll(MEDIA)) {
         if (!out.some((v) => v.url === m[0])) out.push({ url: m[0], kind: classify(m[0]) });
       }
@@ -52,19 +68,23 @@ async function resolveAparat(url: URL): Promise<FoundVideo[]> {
 export const findVideosInPage = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ url: z.string().url().max(2000) }).parse(d))
   .handler(async ({ data }): Promise<{ videos: FoundVideo[]; error: string | null }> => {
-    const target = new URL(data.url);
-    const host = target.hostname.toLowerCase();
-    if (
-      !/^https?:$/.test(target.protocol) ||
-      host === "localhost" ||
-      host.endsWith(".local") ||
-      host.endsWith(".internal") ||
-      /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) ||
-      host.startsWith("[")
-    ) {
+    const target = publicVideoUrl(data.url);
+    if (!target) {
       return { videos: [], error: "That address can't be opened." };
     }
-    if (host.endsWith("aparat.com")) {
+    // Resolve through a fixed public DNS endpoint before fetching an arbitrary
+    // page. Reject private/IPv6 answers; redirects are disabled below.
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(target.hostname)) {
+      try {
+        const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(target.hostname)}&type=A`, {
+          headers: { Accept: "application/dns-json" }, signal: AbortSignal.timeout(4000), redirect: "error",
+        });
+        const dns = await response.json() as { Answer?: { type: number; data: string }[] };
+        const ips = dns.Answer?.filter((answer) => answer.type === 1) ?? [];
+        if (!ips.length || ips.some((answer) => !publicVideoUrl(`https://${answer.data}`))) return { videos: [], error: "That address can't be opened." };
+      } catch { return { videos: [], error: "The page address could not be verified. Try again later." }; }
+    }
+    if (aparatHash(target)) {
       const aparat = await resolveAparat(target);
       if (aparat.length) return { videos: sortVideos(aparat), error: null };
     }
@@ -72,16 +92,19 @@ export const findVideosInPage = createServerFn({ method: "POST" })
       const res = await fetch(data.url, {
         signal: AbortSignal.timeout(12000),
         headers: { "User-Agent": UA, Accept: "text/html,*/*" },
-        redirect: "follow",
+        redirect: "error",
       });
       if (!res.ok) return { videos: [], error: "The page could not be opened." };
-      const html = (await res.text()).slice(0, 3_000_000).replace(/\\\//g, "/").replace(/&amp;/g, "&");
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!/html|json|text/i.test(contentType)) return { videos: [], error: "This address is not a video page." };
+      const html = (await boundedText(res)).replace(/\\\//g, "/").replace(/&amp;/g, "&");
       const base = res.url || data.url;
       const found = new Set<string>();
       const add = (raw: string | undefined) => {
         if (!raw) return;
         try {
-          found.add(new URL(raw.trim(), base).toString());
+          const url = publicVideoUrl(new URL(raw.trim(), base).toString());
+          if (url) found.add(url.toString());
         } catch {
           /* ignore */
         }

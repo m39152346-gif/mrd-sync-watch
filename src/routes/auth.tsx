@@ -13,6 +13,8 @@ export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
       { title: "Account — SyncWatch" },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       {
         name: "description",
         content: "Optional SyncWatch account so your display name follows you between watch parties.",
@@ -45,14 +47,14 @@ function AuthPage() {
     setBusy(true);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
-    if (error) {
-      toast.error(error.message);
+    if (error || !data.user) {
+      toast.error(error?.message ?? "Sign in could not be completed.");
       return;
     }
     const { data: profile } = await supabase
       .from("profiles")
       .select("display_name")
-      .eq("id", data.user!.id)
+      .eq("id", data.user.id)
       .maybeSingle();
     if (profile?.display_name) setStoredName(profile.display_name);
     navigate({ to: "/" });

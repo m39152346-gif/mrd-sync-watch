@@ -16,13 +16,16 @@ import {
   getStoredName,
   initials,
   setStoredName,
+  addRecentRoom,
 } from "@/lib/session";
-import { expectedPosition, SOURCE_LABEL, type PlayerState, type SourceType } from "@/lib/sources";
+import { expectedPosition, learnClockOffset, SOURCE_LABEL, type PlayerState, type SourceType } from "@/lib/sources";
 
 export const Route = createFileRoute("/room/$code")({
   head: ({ params }) => ({
     meta: [
       { title: `Room ${params.code} — SyncWatch` },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       {
         name: "description",
         content: `Join SyncWatch room ${params.code} to watch videos in sync with live chat.`,
@@ -46,7 +49,7 @@ type Participant = {
   last_seen_at: string;
 };
 
-const SYNC_TOLERANCE = 1.25;
+const SYNC_TOLERANCE = 0.6;
 
 function RoomPage() {
   const { code } = Route.useParams();
@@ -63,11 +66,17 @@ function RoomPage() {
   const [duration, setDuration] = useState(0);
   const [copied, setCopied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [token, setToken] = useState("");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const stateRef = useRef<PlayerState | null>(null);
+  stateRef.current = state;
 
   const playerRef = useRef<PlayerHandle>(null);
   const applyingRef = useRef(false);
   const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const token = typeof window === "undefined" ? "" : getSessionToken();
   const color = token ? colorForToken(token) : "#22d3ee";
 
   // Resolve the room from its code.
@@ -84,6 +93,8 @@ function RoomPage() {
         setLoading(false);
       });
     setName(getStoredName());
+    setToken(getSessionToken());
+    addRecentRoom(code.toUpperCase());
     return () => {
       active = false;
     };
@@ -95,7 +106,13 @@ function RoomPage() {
     let active = true;
 
     const join = async () => {
-      await supabase.from("participants").upsert(
+      const { data: others } = await supabase.from("participants").select("session_token")
+        .eq("room_id", roomId).neq("session_token", token)
+        .gt("last_seen_at", new Date(Date.now() - 90000).toISOString());
+      if (others?.length === 0) {
+        await supabase.from("player_state").update({ is_playing: false }).eq("room_id", roomId);
+      }
+      const { error } = await supabase.from("participants").upsert(
         {
           room_id: roomId,
           session_token: token,
@@ -105,6 +122,7 @@ function RoomPage() {
         },
         { onConflict: "room_id,session_token" },
       );
+      if (error) toast.error("Could not join the viewer list. Check your connection.");
     };
     void join();
 
@@ -117,6 +135,11 @@ function RoomPage() {
     }, 25000);
 
     const leave = () => {
+      const current = stateRef.current;
+      const otherActive = participantsRef.current.some((p) => p.session_token !== token && Date.now() - new Date(p.last_seen_at).getTime() < 90000);
+      if (!otherActive && current) {
+        void supabase.from("player_state").update({ is_playing: false, position_seconds: playerRef.current?.getTime() ?? current.position_seconds }).eq("room_id", roomId);
+      }
       void supabase
         .from("participants")
         .delete()
@@ -158,7 +181,7 @@ function RoomPage() {
   useEffect(() => {
     if (!roomId) return;
     let active = true;
-    supabase
+    const loadState = () => supabase
       .from("player_state")
       .select("*")
       .eq("room_id", roomId)
@@ -174,11 +197,18 @@ function RoomPage() {
         { event: "*", schema: "public", table: "player_state", filter: `room_id=eq.${roomId}` },
         (payload) => setState(payload.new as PlayerState),
       )
-      .subscribe();
+      .subscribe((status) => {
+        setConnected(status === "SUBSCRIBED");
+        if (status === "SUBSCRIBED") void loadState();
+      });
+    void loadState();
+    const refresh = () => { if (document.visibilityState === "visible") void loadState(); };
+    document.addEventListener("visibilitychange", refresh);
 
     return () => {
       active = false;
       supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, [roomId]);
 
@@ -191,9 +221,15 @@ function RoomPage() {
         updated_at: new Date().toISOString(),
         updated_by: token,
       };
-      const { error } = await supabase.from("player_state").update(next).eq("room_id", roomId);
+      setSyncing(true);
+      const sent = Date.now();
+      const { data, error } = await supabase.from("player_state").update(next).eq("room_id", roomId).select("*").single();
+      setSyncing(false);
       if (error) toast.error("Could not sync that change.");
-      else setState((current) => (current ? { ...current, ...next } as PlayerState : current));
+      else if (data) {
+        learnClockOffset(data.updated_at, sent, Date.now());
+        setState(data as PlayerState);
+      }
     },
     [roomId, token],
   );
@@ -204,16 +240,16 @@ function RoomPage() {
   useEffect(() => {
     const player = playerRef.current;
     if (!state || !player?.controllable) return;
-    if (state.updated_by === token) return;
 
     const target = expectedPosition(state);
     applyingRef.current = true;
     if (Math.abs(player.getTime() - target) > SYNC_TOLERANCE) player.seek(target);
+    player.setRate(1);
     if (state.is_playing) player.play();
     else player.pause();
     const timer = setTimeout(() => {
       applyingRef.current = false;
-    }, 1200);
+    }, 350);
     return () => clearTimeout(timer);
   }, [state, token, playerReady]);
 
@@ -224,16 +260,17 @@ function RoomPage() {
       if (!player) return;
       setPosition(player.getTime());
       setDuration(player.getDuration());
-      if (!state?.is_playing || !player.controllable || applyingRef.current) return;
+      if (!state?.is_playing || !player.controllable || applyingRef.current) { player.setRate(1); return; }
       const target = expectedPosition(state);
-      if (Math.abs(player.getTime() - target) > SYNC_TOLERANCE * 2) {
+      const drift = target - player.getTime();
+      if (Math.abs(drift) > 2) {
         applyingRef.current = true;
         player.seek(target);
         setTimeout(() => {
           applyingRef.current = false;
-        }, 1000);
-      }
-    }, 1000);
+        }, 350);
+      } else player.setRate(Math.abs(drift) > SYNC_TOLERANCE ? (drift > 0 ? 1.04 : 0.96) : 1);
+    }, 500);
     return () => clearInterval(tick);
   }, [state]);
 
@@ -249,6 +286,9 @@ function RoomPage() {
 
   const togglePlay = () => {
     const player = playerRef.current;
+    applyingRef.current = true;
+    if (state?.is_playing) player?.pause(); else player?.play();
+    setTimeout(() => { applyingRef.current = false; }, 350);
     void publish({
       is_playing: !state?.is_playing,
       position_seconds: player?.getTime() ?? state?.position_seconds ?? 0,
@@ -264,7 +304,7 @@ function RoomPage() {
     seekTimerRef.current = setTimeout(() => {
       applyingRef.current = false;
       void publish({ position_seconds: seconds, is_playing: state?.is_playing ?? false });
-    }, 400);
+    }, 250);
   };
 
   const onLocalPlayPause = (playing: boolean, pos: number) => {
@@ -272,6 +312,31 @@ function RoomPage() {
     if (state && state.is_playing === playing) return;
     void publish({ is_playing: playing, position_seconds: pos });
   };
+
+  const participantsRef = useRef<Participant[]>([]);
+  participantsRef.current = participants;
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else if (stageRef.current?.requestFullscreen) void stageRef.current.requestFullscreen().catch(() => toast.message("Full screen is unavailable in this browser."));
+    else toast.message("Full screen is unavailable in this browser.");
+  };
+  useEffect(() => {
+    const changed = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", changed);
+    return () => { document.removeEventListener("fullscreenchange", changed); if (seekTimerRef.current) clearTimeout(seekTimerRef.current); };
+  }, []);
+  useEffect(() => {
+    const keyboard = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("input, textarea, button, [role=slider], [contenteditable=true]") || !state?.source_ref || state.source_type === "other") return;
+      if (event.code === "Space") { event.preventDefault(); togglePlay(); }
+      if (event.code === "ArrowLeft") { event.preventDefault(); handleSeek(Math.max(0, position - 10)); }
+      if (event.code === "ArrowRight") { event.preventDefault(); handleSeek(Math.min(duration || position + 10, position + 10)); }
+      if (event.key.toLowerCase() === "f") toggleFullscreen();
+    };
+    window.addEventListener("keydown", keyboard);
+    return () => window.removeEventListener("keydown", keyboard);
+  }, [state, position, duration]);
 
   const copyInvite = async () => {
     const url = `${window.location.origin}/room/${code.toUpperCase()}`;
@@ -385,7 +450,8 @@ function RoomPage() {
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1fr_320px]">
-        <section className="space-y-3">
+        <section className="min-w-0 space-y-3">
+          <div ref={stageRef} className="space-y-3 bg-background [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:justify-center [&:fullscreen]:p-3">
           <VideoStage
             handleRef={playerRef}
             sourceType={sourceType}
@@ -408,13 +474,9 @@ function RoomPage() {
             onTogglePlay={togglePlay}
             onSeek={handleSeek}
             onVolume={(volume) => playerRef.current?.setVolume(volume)}
-            fullscreen={false}
-            syncStatus={sourceType === "none" || sourceType === "other" ? "off" : "synced"}
-            onFullscreen={() => {
-              const el = document.querySelector("video, iframe");
-              if (document.fullscreenElement) void document.exitFullscreen();
-              else void el?.requestFullscreen?.().catch(() => {});
-            }}
+            fullscreen={fullscreen}
+            syncStatus={sourceType === "none" || sourceType === "other" ? "off" : connected && !syncing ? "synced" : "syncing"}
+            onFullscreen={toggleFullscreen}
             onSyncAll={() =>
               void publish({
                 position_seconds: playerRef.current?.getTime() ?? 0,
@@ -422,6 +484,7 @@ function RoomPage() {
               })
             }
           />
+          </div>
           <SourcePanel roomId={roomId} onPick={pickSource} />
         </section>
 

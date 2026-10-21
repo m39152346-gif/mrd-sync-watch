@@ -8,3 +8,8 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Use browser-safe helpers in src/lib for upload validation and stable room-scoped upload names; this enables resumability and independent rule tests.
+- Persist shared playback and completed uploads in Lovable Cloud; browser history only remembers room codes, never overrides an active room's shared playback.
+- Read guest browser identity in effects or handlers, never during SSR rendering, to prevent hydration mismatches.
+- Video page discovery uses a bounded public fetch with DNS checks and no redirects; do not introduce a media proxy or bypass provider protections.

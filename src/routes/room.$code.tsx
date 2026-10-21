@@ -24,6 +24,8 @@ export const Route = createFileRoute("/room/$code")({
   head: ({ params }) => ({
     meta: [
       { title: `Room ${params.code} — SyncWatch` },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       {
         name: "description",
         content: `Join SyncWatch room ${params.code} to watch videos in sync with live chat.`,

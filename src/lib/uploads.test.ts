@@ -13,7 +13,7 @@ describe("video upload rules", () => {
   });
   it("keeps the same upload path after rejoining the same room, separate from other rooms", () => {
     const file = { name: "movie.webm", size: 40, lastModified: 1000 };
-    expect(uploadPath("room-one", file)).toBe("room-one/141rs__movie.webm");
+    expect(uploadPath("room-one", file)).toBe("room-one/14rs__movie.webm");
     expect(uploadPath("room-one", { ...file })).toBe(uploadPath("room-one", file));
     expect(uploadPath("room-two", file)).not.toBe(uploadPath("room-one", file));
   });

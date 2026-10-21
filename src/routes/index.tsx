@@ -12,6 +12,8 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "SyncWatch — Watch videos together, in sync" },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       {
         name: "description",
         content:

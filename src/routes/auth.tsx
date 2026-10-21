@@ -13,6 +13,8 @@ export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
       { title: "Account — SyncWatch" },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       {
         name: "description",
         content: "Optional SyncWatch account so your display name follows you between watch parties.",

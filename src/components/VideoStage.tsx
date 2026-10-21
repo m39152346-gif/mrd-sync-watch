@@ -299,7 +299,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
   if (sourceType === "other") {
     return (
       <div className="space-y-2">
-        <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
+        <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-media">
           <iframe
             key={sourceRef}
             src={sourceRef}
@@ -330,7 +330,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
 
   if (sourceType === "file" || sourceType === "upload") {
     return (
-      <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
+      <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-media">
         {fileError ? (
           <div className="flex size-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
             {fileError}
@@ -363,7 +363,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
   }
 
   return (
-    <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
+    <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-media">
       {fileError && <p className="p-4 text-sm text-muted-foreground">{fileError}</p>}
       <div key={`${sourceType}-${sourceRef}`} className="size-full [&>iframe]:size-full">
         <div ref={mountRef} className="size-full" />

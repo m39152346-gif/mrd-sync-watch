@@ -79,7 +79,7 @@ export const findVideosInPage = createServerFn({ method: "POST" })
     }
     if (aparatHash(target)) {
       const aparat = await resolveAparat(target);
-      if (aparat.length) return { videos: sortVideos(aparat), error: null };
+      if (aparat.length) return { videos: aparat.slice(0, 12), error: null };
     }
     try {
       const res = await fetch(data.url, {

@@ -13,6 +13,25 @@ import { unwrapEmbedCode, detectSource, parseYouTubeId, SOURCE_LABEL, type Sourc
 import { searchYouTube, type YouTubeResult } from "@/lib/youtube.functions";
 import { findVideosInPage, type FoundVideo } from "@/lib/extract.functions";
 import { uploadPath, videoUploadError } from "@/lib/uploads";
+import { aparatApiEndpoints, aparatEmbedUrl, aparatHash, mediaUrlsIn, pickAparatVideo } from "@/lib/public-video-url";
+
+/**
+ * Asks Aparat directly from the viewer's own browser first: Aparat often
+ * refuses requests from servers outside Iran but answers its own visitors.
+ */
+async function findAparatInBrowser(hash: string): Promise<string | null> {
+  for (const endpoint of aparatApiEndpoints(hash)) {
+    try {
+      const res = await fetch(endpoint, { signal: AbortSignal.timeout(7000), credentials: "omit" });
+      if (!res.ok) continue;
+      const best = pickAparatVideo(mediaUrlsIn(await res.text()));
+      if (best) return best;
+    } catch {
+      /* blocked or offline — try the next way */
+    }
+  }
+  return null;
+}
 
 type Props = {
   roomId: string;
@@ -234,15 +253,21 @@ export function SourcePanel({ roomId, onPick }: Props) {
               setFinding(true);
               setFound([]);
               try {
-                const r = await runFind({ data: { url: detected.ref } });
-                const synced = r.videos.find((v) => v.kind === "hls" || v.kind === "file");
-                const host = new URL(detected.ref).hostname;
-                if (synced && (host === "aparat.com" || host.endsWith(".aparat.com"))) {
-                  onPick("file", synced.url, null);
-                  toast.success("Found the real video — everyone stays in sync.");
+                const aparat = aparatHash(new URL(detected.ref));
+                if (aparat) {
+                  const best = (await findAparatInBrowser(aparat)) ??
+                    pickAparatVideo((await runFind({ data: { url: detected.ref } }).catch(() => ({ videos: [] as FoundVideo[] }))).videos.map((v) => v.url));
                   setLink("");
+                  if (best) {
+                    onPick("file", best, "Aparat video");
+                    toast.success("Found the real Aparat video — everyone stays in sync.");
+                  } else {
+                    onPick("other", aparatEmbedUrl(aparat), "Aparat video");
+                    toast.message("Aparat didn't share the video file, so it plays in Aparat's own player. Use the group timer to start together.");
+                  }
                   return;
                 }
+                const r = await runFind({ data: { url: detected.ref } });
                 setFound(r.videos);
                 if (r.videos.length === 0) {
                   toast.message(r.error ?? "No controllable video found — embedding without sync.");

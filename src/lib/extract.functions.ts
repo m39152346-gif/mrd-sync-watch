@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { aparatHash, publicVideoUrl } from "./public-video-url";
+import { aparatApiEndpoints, aparatHash, mediaUrlsIn, pickAparatVideo, publicVideoUrl } from "./public-video-url";
 
 export type FoundVideo = { url: string; kind: "file" | "hls" | "youtube" | "vimeo" | "embed" };
 
@@ -43,25 +43,18 @@ async function boundedText(response: Response): Promise<string> {
 async function resolveAparat(url: URL): Promise<FoundVideo[]> {
   const hash = aparatHash(url);
   if (!hash) return [];
-  const out: FoundVideo[] = [];
-  const endpoints = [
-    `https://www.aparat.com/api/fa/v1/video/video/show/videohash/${hash}?pr=1&mf=1`,
-    `https://www.aparat.com/etc/api/video/videohash/${hash}`,
-  ];
-  for (const endpoint of endpoints) {
+  for (const endpoint of aparatApiEndpoints(hash)) {
     try {
       const res = await fetch(endpoint, { redirect: "error", signal: AbortSignal.timeout(8000), headers: { "User-Agent": UA, Accept: "application/json" } });
       if (!res.ok) continue;
-      const text = (await boundedText(res)).replace(/\\\//g, "/");
-      for (const m of text.matchAll(MEDIA)) {
-        if (!out.some((v) => v.url === m[0])) out.push({ url: m[0], kind: classify(m[0]) });
-      }
-      if (out.length) break;
+      const urls = mediaUrlsIn(await boundedText(res));
+      const best = pickAparatVideo(urls);
+      if (best) return [best, ...urls.filter((u) => u !== best)].map((u) => ({ url: u, kind: classify(u) }));
     } catch {
       /* try the next endpoint */
     }
   }
-  return out;
+  return [];
 }
 
 /** Fetches a public web page and looks for playable video addresses inside it. */
@@ -86,7 +79,7 @@ export const findVideosInPage = createServerFn({ method: "POST" })
     }
     if (aparatHash(target)) {
       const aparat = await resolveAparat(target);
-      if (aparat.length) return { videos: sortVideos(aparat), error: null };
+      if (aparat.length) return { videos: aparat.slice(0, 12), error: null };
     }
     try {
       const res = await fetch(data.url, {

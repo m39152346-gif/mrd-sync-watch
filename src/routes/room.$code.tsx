@@ -76,6 +76,7 @@ function RoomPage() {
 
   const playerRef = useRef<PlayerHandle>(null);
   const applyingRef = useRef(false);
+  const lastSeekRef = useRef(0);
   const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const color = token ? colorForToken(token) : "#22d3ee";
 

@@ -263,7 +263,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
                     toast.success("Found the real Aparat video — everyone stays in sync.");
                   } else {
                     onPick("other", aparatEmbedUrl(aparat), "Aparat video");
-                    toast.message("Aparat didn't share the video file, so it plays in Aparat's own player. Use the group timer to start together.");
+                    toast.message("Aparat didn't share the video file, so it plays in Aparat's own player. Press play together; sync isn't guaranteed here.");
                   }
                   return;
                 }

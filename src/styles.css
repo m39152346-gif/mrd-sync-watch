@@ -96,6 +96,10 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
+
+  [dir="rtl"] body {
+    font-family: "Vazirmatn", "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  }
 }
 
 @utility bg-stage {

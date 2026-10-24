@@ -76,6 +76,7 @@ function RoomPage() {
 
   const playerRef = useRef<PlayerHandle>(null);
   const applyingRef = useRef(false);
+  const lastSeekRef = useRef(0);
   const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const color = token ? colorForToken(token) : "#22d3ee";
 
@@ -242,8 +243,13 @@ function RoomPage() {
     if (!state || !player?.controllable) return;
 
     const target = expectedPosition(state);
+    const own = state.updated_by === token;
     applyingRef.current = true;
-    if (Math.abs(player.getTime() - target) > SYNC_TOLERANCE) player.seek(target);
+    // Never re-seek our own update (avoids rebuffer loops); others: only on a real jump.
+    if (!own && Math.abs(player.getTime() - target) > 1.5) {
+      player.seek(target);
+      lastSeekRef.current = Date.now();
+    }
     player.setRate(1);
     if (state.is_playing) player.play();
     else player.pause();
@@ -261,15 +267,18 @@ function RoomPage() {
       setPosition(player.getTime());
       setDuration(player.getDuration());
       if (!state?.is_playing || !player.controllable || applyingRef.current) { player.setRate(1); return; }
+      // While the video is still loading, correcting would only cause more stalls.
+      if (player.isBuffering()) { player.setRate(1); return; }
       const target = expectedPosition(state);
       const drift = target - player.getTime();
-      if (Math.abs(drift) > 2) {
+      if (Math.abs(drift) > 3 && Date.now() - lastSeekRef.current > 5000) {
+        lastSeekRef.current = Date.now();
         applyingRef.current = true;
         player.seek(target);
         setTimeout(() => {
           applyingRef.current = false;
         }, 350);
-      } else player.setRate(Math.abs(drift) > SYNC_TOLERANCE ? (drift > 0 ? 1.04 : 0.96) : 1);
+      } else player.setRate(Math.abs(drift) > SYNC_TOLERANCE ? (drift > 0 ? 1.05 : 0.95) : 1);
     }, 500);
     return () => clearInterval(tick);
   }, [state]);

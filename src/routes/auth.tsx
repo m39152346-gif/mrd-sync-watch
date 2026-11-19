@@ -1,3 +1,4 @@
+import { useI18n, LanguageToggle } from "@/lib/i18n";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -17,12 +18,14 @@ export const Route = createFileRoute("/auth")({
       { name: "twitter:card", content: "summary_large_image" },
       {
         name: "description",
-        content: "Optional SyncWatch account so your display name follows you between watch parties.",
+        content:
+          "Optional SyncWatch account so your display name follows you between watch parties.",
       },
       { property: "og:title", content: "Account — SyncWatch" },
       {
         property: "og:description",
-        content: "Sign in or sign up to save your SyncWatch display name. Guests can skip this entirely.",
+        content:
+          "Sign in or sign up to save your SyncWatch display name. Guests can skip this entirely.",
       },
     ],
   }),
@@ -30,6 +33,7 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -48,7 +52,7 @@ function AuthPage() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
     if (error || !data.user) {
-      toast.error(error?.message ?? "Sign in could not be completed.");
+      toast.error(t("error.signIn"));
       return;
     }
     const { data: profile } = await supabase
@@ -63,7 +67,7 @@ function AuthPage() {
   const signUp = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!displayName.trim()) {
-      toast.error("Pick a display name.");
+      toast.error(t("error.pickName"));
       return;
     }
     setBusy(true);
@@ -77,35 +81,44 @@ function AuthPage() {
     });
     setBusy(false);
     if (error) {
-      toast.error(error.message);
+      toast.error(t("error.signUp"));
       return;
     }
     setStoredName(displayName.trim());
-    toast.success("Check your email to confirm your account.");
+    toast.success(t("checkEmail"));
   };
 
   return (
     <main className="bg-stage flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm space-y-5">
-        <div className="text-center">
-          <h1 className="text-gradient text-3xl font-bold">SyncWatch account</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Optional — guests can join any room without signing up.
-          </p>
+        <div className="flex justify-end">
+          <LanguageToggle />
         </div>
-        <Tabs defaultValue="signin" className="rounded-2xl border border-border bg-card p-5">
+        <div className="text-center">
+          <h1 className="text-gradient text-3xl font-bold"> {t("auth.title")} </h1>
+          <p className="mt-1 text-sm text-muted-foreground"> {t("auth.subtitle")}</p>
+        </div>
+        <Tabs
+          dir={lang === "fa" ? "rtl" : "ltr"}
+          defaultValue="signin"
+          className="rounded-2xl border border-border bg-card p-5"
+        >
           <TabsList className="w-full">
             <TabsTrigger value="signin" className="flex-1">
-              Sign in
+              {" "}
+              {t("signIn")}
             </TabsTrigger>
             <TabsTrigger value="signup" className="flex-1">
-              Sign up
+              {" "}
+              {t("signUp")}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="signin" className="mt-4">
             <form onSubmit={signIn} className="space-y-3">
               <Input
                 type="email"
+                dir="ltr"
+                aria-label={t("email.label")}
                 required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -113,13 +126,14 @@ function AuthPage() {
               />
               <Input
                 type="password"
+                aria-label={t("password.placeholder")}
                 required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Password"
+                placeholder={t("password.placeholder")}
               />
               <Button type="submit" className="w-full" disabled={busy}>
-                {busy && <Loader2 className="size-4 animate-spin" />} Sign in
+                {busy && <Loader2 className="size-4 animate-spin" />} {t("signIn")}
               </Button>
             </form>
           </TabsContent>
@@ -129,10 +143,12 @@ function AuthPage() {
                 value={displayName}
                 maxLength={24}
                 onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Display name"
+                placeholder={t("displayNamePlaceholder")}
               />
               <Input
                 type="email"
+                dir="ltr"
+                aria-label={t("email.label")}
                 required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -140,21 +156,23 @@ function AuthPage() {
               />
               <Input
                 type="password"
+                aria-label={t("password.placeholder")}
                 required
                 minLength={6}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Password"
+                placeholder={t("password.placeholder")}
               />
               <Button type="submit" className="w-full" disabled={busy}>
-                {busy && <Loader2 className="size-4 animate-spin" />} Create account
+                {busy && <Loader2 className="size-4 animate-spin" />} {t("createAccountBtn")}
               </Button>
             </form>
           </TabsContent>
         </Tabs>
         <p className="text-center text-xs text-muted-foreground">
           <Link to="/" className="text-primary underline-offset-2 hover:underline">
-            Back to rooms
+            {" "}
+            {t("backToRooms")}
           </Link>
         </p>
       </div>

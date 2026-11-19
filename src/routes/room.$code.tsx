@@ -1,3 +1,4 @@
+import { useI18n, LanguageToggle } from "@/lib/i18n";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Link2, Loader2, MessageSquare, X } from "lucide-react";
@@ -18,7 +19,12 @@ import {
   setStoredName,
   addRecentRoom,
 } from "@/lib/session";
-import { expectedPosition, learnClockOffset, SOURCE_LABEL, type PlayerState, type SourceType } from "@/lib/sources";
+import {
+  expectedPosition,
+  learnClockOffset,
+  type PlayerState,
+  type SourceType,
+} from "@/lib/sources";
 
 export const Route = createFileRoute("/room/$code")({
   head: ({ params }) => ({
@@ -52,6 +58,7 @@ type Participant = {
 const SYNC_TOLERANCE = 0.6;
 
 function RoomPage() {
+  const { t } = useI18n();
   const { code } = Route.useParams();
   const navigate = useNavigate();
 
@@ -107,8 +114,11 @@ function RoomPage() {
     let active = true;
 
     const join = async () => {
-      const { data: others } = await supabase.from("participants").select("session_token")
-        .eq("room_id", roomId).neq("session_token", token)
+      const { data: others } = await supabase
+        .from("participants")
+        .select("session_token")
+        .eq("room_id", roomId)
+        .neq("session_token", token)
         .gt("last_seen_at", new Date(Date.now() - 90000).toISOString());
       if (others?.length === 0) {
         await supabase.from("player_state").update({ is_playing: false }).eq("room_id", roomId);
@@ -123,7 +133,7 @@ function RoomPage() {
         },
         { onConflict: "room_id,session_token" },
       );
-      if (error) toast.error("Could not join the viewer list. Check your connection.");
+      if (error) toast.error(t("error.joinList"));
     };
     void join();
 
@@ -137,15 +147,19 @@ function RoomPage() {
 
     const leave = () => {
       const current = stateRef.current;
-      const otherActive = participantsRef.current.some((p) => p.session_token !== token && Date.now() - new Date(p.last_seen_at).getTime() < 90000);
+      const otherActive = participantsRef.current.some(
+        (p) => p.session_token !== token && Date.now() - new Date(p.last_seen_at).getTime() < 90000,
+      );
       if (!otherActive && current) {
-        void supabase.from("player_state").update({ is_playing: false, position_seconds: playerRef.current?.getTime() ?? current.position_seconds }).eq("room_id", roomId);
+        void supabase
+          .from("player_state")
+          .update({
+            is_playing: false,
+            position_seconds: playerRef.current?.getTime() ?? current.position_seconds,
+          })
+          .eq("room_id", roomId);
       }
-      void supabase
-        .from("participants")
-        .delete()
-        .eq("room_id", roomId)
-        .eq("session_token", token);
+      void supabase.from("participants").delete().eq("room_id", roomId).eq("session_token", token);
     };
     window.addEventListener("beforeunload", leave);
 
@@ -182,14 +196,15 @@ function RoomPage() {
   useEffect(() => {
     if (!roomId) return;
     let active = true;
-    const loadState = () => supabase
-      .from("player_state")
-      .select("*")
-      .eq("room_id", roomId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (active && data) setState(data as PlayerState);
-      });
+    const loadState = () =>
+      supabase
+        .from("player_state")
+        .select("*")
+        .eq("room_id", roomId)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (active && data) setState(data as PlayerState);
+        });
 
     const channel = supabase
       .channel(`player:${roomId}`)
@@ -203,7 +218,9 @@ function RoomPage() {
         if (status === "SUBSCRIBED") void loadState();
       });
     void loadState();
-    const refresh = () => { if (document.visibilityState === "visible") void loadState(); };
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadState();
+    };
     document.addEventListener("visibilitychange", refresh);
 
     return () => {
@@ -224,9 +241,14 @@ function RoomPage() {
       };
       setSyncing(true);
       const sent = Date.now();
-      const { data, error } = await supabase.from("player_state").update(next).eq("room_id", roomId).select("*").single();
+      const { data, error } = await supabase
+        .from("player_state")
+        .update(next)
+        .eq("room_id", roomId)
+        .select("*")
+        .single();
       setSyncing(false);
-      if (error) toast.error("Could not sync that change.");
+      if (error) toast.error(t("error.sync"));
       else if (data) {
         learnClockOffset(data.updated_at, sent, Date.now());
         setState(data as PlayerState);
@@ -266,9 +288,15 @@ function RoomPage() {
       if (!player) return;
       setPosition(player.getTime());
       setDuration(player.getDuration());
-      if (!state?.is_playing || !player.controllable || applyingRef.current) { player.setRate(1); return; }
+      if (!state?.is_playing || !player.controllable || applyingRef.current) {
+        player.setRate(1);
+        return;
+      }
       // While the video is still loading, correcting would only cause more stalls.
-      if (player.isBuffering()) { player.setRate(1); return; }
+      if (player.isBuffering()) {
+        player.setRate(1);
+        return;
+      }
       const target = expectedPosition(state);
       const drift = target - player.getTime();
       if (Math.abs(drift) > 3 && Date.now() - lastSeekRef.current > 5000) {
@@ -296,8 +324,11 @@ function RoomPage() {
   const togglePlay = () => {
     const player = playerRef.current;
     applyingRef.current = true;
-    if (state?.is_playing) player?.pause(); else player?.play();
-    setTimeout(() => { applyingRef.current = false; }, 350);
+    if (state?.is_playing) player?.pause();
+    else player?.play();
+    setTimeout(() => {
+      applyingRef.current = false;
+    }, 350);
     void publish({
       is_playing: !state?.is_playing,
       position_seconds: player?.getTime() ?? state?.position_seconds ?? 0,
@@ -326,21 +357,41 @@ function RoomPage() {
   participantsRef.current = participants;
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-    else if (stageRef.current?.requestFullscreen) void stageRef.current.requestFullscreen().catch(() => toast.message("Full screen is unavailable in this browser."));
-    else toast.message("Full screen is unavailable in this browser.");
+    else if (stageRef.current?.requestFullscreen)
+      void stageRef.current
+        .requestFullscreen()
+        .catch(() => toast.message(t("fullscreenUnavailable")));
+    else toast.message(t("fullscreenUnavailable"));
   };
   useEffect(() => {
     const changed = () => setFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", changed);
-    return () => { document.removeEventListener("fullscreenchange", changed); if (seekTimerRef.current) clearTimeout(seekTimerRef.current); };
+    return () => {
+      document.removeEventListener("fullscreenchange", changed);
+      if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+    };
   }, []);
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      if (target.closest("input, textarea, button, [role=slider], [contenteditable=true]") || !state?.source_ref || state.source_type === "other") return;
-      if (event.code === "Space") { event.preventDefault(); togglePlay(); }
-      if (event.code === "ArrowLeft") { event.preventDefault(); handleSeek(Math.max(0, position - 10)); }
-      if (event.code === "ArrowRight") { event.preventDefault(); handleSeek(Math.min(duration || position + 10, position + 10)); }
+      if (
+        target.closest("input, textarea, button, [role=slider], [contenteditable=true]") ||
+        !state?.source_ref ||
+        state.source_type === "other"
+      )
+        return;
+      if (event.code === "Space") {
+        event.preventDefault();
+        togglePlay();
+      }
+      if (event.code === "ArrowLeft") {
+        event.preventDefault();
+        handleSeek(Math.max(0, position - 10));
+      }
+      if (event.code === "ArrowRight") {
+        event.preventDefault();
+        handleSeek(Math.min(duration || position + 10, position + 10));
+      }
       if (event.key.toLowerCase() === "f") toggleFullscreen();
     };
     window.addEventListener("keydown", keyboard);
@@ -359,12 +410,12 @@ function RoomPage() {
       const ok = document.execCommand("copy");
       area.remove();
       if (!ok) {
-        toast.message(`Share this link: ${url}`);
+        toast.message(`${t("shareLink")} ${url}`);
         return;
       }
     }
     setCopied(true);
-    toast.success("Invite link copied");
+    toast.success(t("inviteCopied"));
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -379,10 +430,13 @@ function RoomPage() {
   if (!roomId) {
     return (
       <main className="bg-stage flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center">
-        <h1 className="text-2xl font-semibold">Room {code.toUpperCase()} not found</h1>
-        <p className="text-sm text-muted-foreground">The code may have expired or been mistyped.</p>
+        <LanguageToggle />
+        <h1 className="text-2xl font-semibold">
+          {t("roomNotFound", { code: code.toUpperCase() })}
+        </h1>
+        <p className="text-sm text-muted-foreground"> {t("roomNotFoundHint")} </p>
         <Button asChild>
-          <Link to="/">Back to SyncWatch</Link>
+          <Link to="/"> {t("backToApp")} </Link>
         </Button>
       </main>
     );
@@ -393,32 +447,35 @@ function RoomPage() {
       <main className="bg-stage flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-card p-5 shadow-glow">
           <div>
-            <h1 className="text-xl font-semibold">Join room {code.toUpperCase()}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Pick a display name — no account needed.
-            </p>
+            <LanguageToggle />
+            <h1 className="text-xl font-semibold">
+              {t("joinRoomTitle", { code: code.toUpperCase() })}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground"> {t("joinRoomHint")}</p>
           </div>
           <Input
             value={nameDraft}
             maxLength={24}
             onChange={(event) => setNameDraft(event.target.value)}
-            placeholder="Your name"
+            placeholder={t("yourName")}
           />
           <Button
             className="w-full"
             onClick={() => {
               if (!nameDraft.trim()) {
-                toast.error("Add a display name.");
+                toast.error(t("error.addName"));
                 return;
               }
               setStoredName(nameDraft.trim());
               setName(nameDraft.trim());
             }}
           >
-            Enter room
+            {" "}
+            {t("enterRoom")}
           </Button>
           <Button variant="ghost" className="w-full" onClick={() => navigate({ to: "/" })}>
-            Cancel
+            {" "}
+            {t("cancel")}
           </Button>
         </div>
       </main>
@@ -436,63 +493,81 @@ function RoomPage() {
         <Link to="/" className="text-gradient text-xl font-bold">
           SyncWatch
         </Link>
-        <span className="rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-sm tracking-[0.25em]">
+        <span
+          dir="ltr"
+          className="rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-sm "
+        >
           {code.toUpperCase()}
         </span>
         <Button variant="secondary" size="sm" onClick={copyInvite}>
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />} Copy invite link
+          {copied ? <Check className="size-4" /> : <Copy className="size-4" />} {t("copyInvite")}
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          className="ml-auto lg:hidden"
+          className="ms-auto lg:hidden"
           onClick={() => {
             setChatOpen((open) => {
-              if (!open) setTimeout(() => document.getElementById("room-sidebar")?.scrollIntoView({ behavior: "smooth" }), 50);
+              if (!open)
+                setTimeout(
+                  () =>
+                    document.getElementById("room-sidebar")?.scrollIntoView({ behavior: "smooth" }),
+                  50,
+                );
               return !open;
             });
           }}
         >
           {chatOpen ? <X className="size-4" /> : <MessageSquare className="size-4" />}
-          {chatOpen ? "Hide chat" : "Chat"}
+          {chatOpen ? t("hideChat") : t("chat")}
         </Button>
+        <LanguageToggle />
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1fr_320px]">
         <section className="min-w-0 space-y-3">
-          <div ref={stageRef} className="space-y-3 bg-background [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:justify-center [&:fullscreen]:p-3">
-          <VideoStage
-            handleRef={playerRef}
-            sourceType={sourceType}
-            sourceRef={state?.source_ref ?? null}
-            onLocalPlayPause={onLocalPlayPause}
-            onReady={() => setPlayerReady((n) => n + 1)}
-          />
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Link2 className="size-3.5" />
-            <span className="truncate">
-              {state?.source_title ?? SOURCE_LABEL[sourceType]}
-              {state?.source_title ? ` · ${SOURCE_LABEL[sourceType]}` : ""}
-            </span>
-          </div>
-          <PlaybackControls
-            isPlaying={state?.is_playing ?? false}
-            position={position}
-            duration={duration}
-            disabled={sourceType === "none" || sourceType === "other"}
-            onTogglePlay={togglePlay}
-            onSeek={handleSeek}
-            onVolume={(volume) => playerRef.current?.setVolume(volume)}
-            fullscreen={fullscreen}
-            syncStatus={sourceType === "none" || sourceType === "other" ? "off" : connected && !syncing ? "synced" : "syncing"}
-            onFullscreen={toggleFullscreen}
-            onSyncAll={() =>
-              void publish({
-                position_seconds: playerRef.current?.getTime() ?? 0,
-                is_playing: state?.is_playing ?? false,
-              })
-            }
-          />
+          <div
+            ref={stageRef}
+            className="space-y-3 bg-background [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:justify-center [&:fullscreen]:p-3"
+          >
+            <VideoStage
+              handleRef={playerRef}
+              sourceType={sourceType}
+              sourceRef={state?.source_ref ?? null}
+              onLocalPlayPause={onLocalPlayPause}
+              onReady={() => setPlayerReady((n) => n + 1)}
+            />
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Link2 className="size-3.5" />
+              <span className="truncate">
+                {state?.source_title ?? t(`source.${sourceType}`)}
+                {state?.source_title ? ` · ${t(`source.${sourceType}`)}` : ""}
+              </span>
+            </div>
+            <PlaybackControls
+              isPlaying={state?.is_playing ?? false}
+              position={position}
+              duration={duration}
+              disabled={sourceType === "none" || sourceType === "other"}
+              onTogglePlay={togglePlay}
+              onSeek={handleSeek}
+              onVolume={(volume) => playerRef.current?.setVolume(volume)}
+              fullscreen={fullscreen}
+              syncStatus={
+                sourceType === "none" || sourceType === "other"
+                  ? "off"
+                  : connected && !syncing
+                    ? "synced"
+                    : "syncing"
+              }
+              onFullscreen={toggleFullscreen}
+              onSyncAll={() =>
+                void publish({
+                  position_seconds: playerRef.current?.getTime() ?? 0,
+                  is_playing: state?.is_playing ?? false,
+                })
+              }
+            />
           </div>
           <SourcePanel roomId={roomId} onPick={pickSource} />
         </section>
@@ -503,7 +578,7 @@ function RoomPage() {
         >
           <div className="rounded-xl border border-border bg-card p-3">
             <h2 className="mb-2 text-sm font-semibold">
-              Watching · {active.length || 1}
+              {t("watching")} · {active.length || 1}
             </h2>
             <ul className="space-y-2">
               {active.map((participant) => (
@@ -516,8 +591,9 @@ function RoomPage() {
                   </span>
                   <span className="truncate">{participant.display_name}</span>
                   {participant.is_host && (
-                    <span className="ml-auto rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground">
-                      host
+                    <span className="ms-auto rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground">
+                      {" "}
+                      {t("host")}
                     </span>
                   )}
                 </li>

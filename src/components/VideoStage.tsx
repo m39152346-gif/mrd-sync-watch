@@ -1,3 +1,4 @@
+import { useI18n, type MessageKey } from "@/lib/i18n";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { AlertTriangle, ExternalLink, Film } from "lucide-react";
 import { toast } from "sonner";
@@ -39,7 +40,7 @@ function loadScript(src: string, marker: string) {
   return new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[data-marker="${marker}"]`);
     if (existing) {
-      if (existing.dataset['loaded'] === "true") resolve();
+      if (existing.dataset["loaded"] === "true") resolve();
       else {
         existing.addEventListener("load", () => resolve());
         existing.addEventListener("error", () => reject(new Error("script failed")));
@@ -49,9 +50,9 @@ function loadScript(src: string, marker: string) {
     const script = document.createElement("script");
     script.src = src;
     script.async = true;
-    script.dataset['marker'] = marker;
+    script.dataset["marker"] = marker;
     script.addEventListener("load", () => {
-      script.dataset['loaded'] = "true";
+      script.dataset["loaded"] = "true";
       resolve();
     });
     script.addEventListener("error", () => reject(new Error("script failed")));
@@ -78,6 +79,7 @@ async function waitForYouTubeApi() {
 }
 
 export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause, onReady }: Props) {
+  const { t } = useI18n();
   const mountRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const ytRef = useRef<any>(null);
@@ -86,7 +88,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
   const vimeoDurationRef = useRef(0);
   const volumeRef = useRef(1);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<MessageKey | null>(null);
 
   // Resolve the playable URL for direct links and Storage uploads.
   useEffect(() => {
@@ -104,7 +106,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
         .then(({ data, error }) => {
           if (!active) return;
           if (error || !data?.signedUrl) {
-            setFileError("This uploaded video could not be loaded.");
+            setFileError("error.uploadLoad");
             return;
           }
           setFileUrl(data.signedUrl);
@@ -129,15 +131,24 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
     }
     let hls: { destroy: () => void } | null = null;
     let cancelled = false;
-    void import("hls.js").then(({ default: Hls }) => {
-      if (cancelled) return;
-      if (!Hls.isSupported()) { setFileError("This browser cannot play this stream."); return; }
-      const instance = new Hls();
-      instance.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) setFileError("This stream could not be loaded. Try another video link."); });
-      instance.loadSource(fileUrl);
-      instance.attachMedia(video);
-      hls = instance;
-    }).catch(() => { if (!cancelled) setFileError("The stream player could not load."); });
+    void import("hls.js")
+      .then(({ default: Hls }) => {
+        if (cancelled) return;
+        if (!Hls.isSupported()) {
+          setFileError("error.noStreamSupport");
+          return;
+        }
+        const instance = new Hls();
+        instance.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) setFileError("error.streamLoad");
+        });
+        instance.loadSource(fileUrl);
+        instance.attachMedia(video);
+        hls = instance;
+      })
+      .catch(() => {
+        if (!cancelled) setFileError("error.streamPlayer");
+      });
     return () => {
       cancelled = true;
       hls?.destroy();
@@ -170,7 +181,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
           },
         },
       });
-    })().catch(() => setFileError("YouTube could not be loaded. Check your connection."));
+    })().catch(() => setFileError("error.youtubeLoad"));
     return () => {
       destroyed = true;
       try {
@@ -207,7 +218,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
         player.setVolume(volumeRef.current);
         onReady?.();
       });
-    })().catch(() => setFileError("Vimeo could not be loaded. Check your connection."));
+    })().catch(() => setFileError("error.vimeoLoad"));
     return () => {
       destroyed = true;
       try {
@@ -224,7 +235,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
   function notifyMuted() {
     if (mutedNoticeRef.current) return;
     mutedNoticeRef.current = true;
-    toast("Playing muted — raise the volume to hear it", { id: "autoplay-muted" });
+    toast(t("mutedNotice"), { id: "autoplay-muted" });
   }
 
   useImperativeHandle(
@@ -297,7 +308,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
     return (
       <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card text-muted-foreground">
         <Film className="size-10 opacity-60" />
-        <p className="text-sm">Pick something to watch to get started.</p>
+        <p className="text-sm"> {t("pickSomething")} </p>
       </div>
     );
   }
@@ -309,7 +320,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
           <iframe
             key={sourceRef}
             src={sourceRef}
-            title="Embedded video"
+            title={t("embedded.title")}
             className="size-full"
             allow="autoplay; fullscreen; encrypted-media"
             allowFullScreen
@@ -317,9 +328,9 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 font-medium text-accent-foreground">
-            <AlertTriangle className="size-3.5" /> Sync not guaranteed for this source
+            <AlertTriangle className="size-3.5" /> {t("syncNotGuaranteed")}
           </span>
-          <span>If the site blocks embedding, open it directly:</span>
+          <span> {t("embedBlocked")} </span>
           <a
             href={sourceRef}
             target="_blank"
@@ -339,7 +350,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
       <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-media">
         {fileError ? (
           <div className="flex size-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
-            {fileError}
+            {t(fileError)}
           </div>
         ) : fileUrl ? (
           <video
@@ -357,11 +368,12 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
             onPlay={() => onLocalPlayPause?.(true, videoRef.current?.currentTime ?? 0)}
             onPause={() => onLocalPlayPause?.(false, videoRef.current?.currentTime ?? 0)}
             onEnded={() => onLocalPlayPause?.(false, videoRef.current?.currentTime ?? 0)}
-            onError={() => setFileError("This video could not be played. The link may be broken, blocked by its site, or in a format this browser can't play (try MP4 H.264 or WebM).")}
+            onError={() => setFileError("error.videoPlay")}
           />
         ) : (
           <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
-            Loading video…
+            {" "}
+            {t("loadingVideo")}
           </div>
         )}
       </div>
@@ -370,7 +382,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
 
   return (
     <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-media">
-      {fileError && <p className="p-4 text-sm text-muted-foreground">{fileError}</p>}
+      {fileError && <p className="p-4 text-sm text-muted-foreground">{t(fileError)}</p>}
       <div key={`${sourceType}-${sourceRef}`} className="size-full [&>iframe]:size-full">
         <div ref={mountRef} className="size-full" />
       </div>

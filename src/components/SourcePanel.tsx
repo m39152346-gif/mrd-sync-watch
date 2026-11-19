@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import * as tus from "tus-js-client";
 import { useServerFn } from "@tanstack/react-start";
@@ -9,11 +10,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
-import { unwrapEmbedCode, detectSource, parseYouTubeId, SOURCE_LABEL, type SourceType } from "@/lib/sources";
+import { unwrapEmbedCode, detectSource, parseYouTubeId, type SourceType } from "@/lib/sources";
 import { searchYouTube, type YouTubeResult } from "@/lib/youtube.functions";
 import { findVideosInPage, type FoundVideo } from "@/lib/extract.functions";
 import { uploadPath, videoUploadError } from "@/lib/uploads";
-import { aparatApiEndpoints, aparatEmbedUrl, aparatHash, mediaUrlsIn, pickAparatVideo } from "@/lib/public-video-url";
+import {
+  aparatApiEndpoints,
+  aparatEmbedUrl,
+  aparatHash,
+  mediaUrlsIn,
+  pickAparatVideo,
+} from "@/lib/public-video-url";
 
 /**
  * Asks Aparat directly from the viewer's own browser first: Aparat often
@@ -39,6 +46,7 @@ type Props = {
 };
 
 export function SourcePanel({ roomId, onPick }: Props) {
+  const { t, lang } = useI18n();
   const runSearch = useServerFn(searchYouTube);
   const runFind = useServerFn(findVideosInPage);
   const [finding, setFinding] = useState(false);
@@ -57,10 +65,11 @@ export function SourcePanel({ roomId, onPick }: Props) {
     try {
       const response = await runSearch({ data: { query: query.trim() } });
       setResults(response.results);
-      if (response.error) toast.error(response.error);
-      else if (response.results.length === 0) toast.message("No videos found.");
+      if (response.error)
+        toast.error(lang === "fa" ? t("error.searchUnavailable") : response.error);
+      else if (response.results.length === 0) toast.message(t("noVideosFound"));
     } catch {
-      toast.error("Search failed. Try pasting a link instead.");
+      toast.error(t("error.searchFailed"));
     } finally {
       setSearching(false);
     }
@@ -80,7 +89,10 @@ export function SourcePanel({ roomId, onPick }: Props) {
     setLibrary(
       (data ?? [])
         .filter((f) => f.name && !f.name.startsWith("."))
-        .map((f) => ({ path: `${roomId}/${f.name}`, label: f.name.split("__").slice(1).join("__") || f.name })),
+        .map((f) => ({
+          path: `${roomId}/${f.name}`,
+          label: f.name.split("__").slice(1).join("__") || f.name,
+        })),
     );
   };
   useEffect(() => {
@@ -98,24 +110,24 @@ export function SourcePanel({ roomId, onPick }: Props) {
     const ext = (file.name.split(".").pop() ?? "").toLowerCase();
     const validationError = videoUploadError(file);
     if (validationError) {
-      toast.error(validationError);
+      toast.error(t(validationError));
       return;
     }
     const probe = document.createElement("video");
     const mime = file.type || `video/${ext === "mov" ? "quicktime" : ext}`;
     if (!probe.canPlayType(mime) && ["avi", "wmv", "flv", "mkv"].includes(ext)) {
-      toast.warning("This format may not play in every browser. MP4 (H.264) works everywhere.");
+      toast.warning(t("formatWarning"));
     }
     // Same file → same name, so a re-pick after leaving resumes instead of restarting.
     const path = uploadPath(roomId, file);
     const existing = library.find((item) => item.path === path);
     if (existing) {
       onPick("upload", path, file.name);
-      toast.success("Already uploaded — playing it right away.");
+      toast.success(t("alreadyUploaded"));
       return;
     }
     const { data: session } = await supabase.auth.getSession();
-    const key = import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY'] as string;
+    const key = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] as string;
     const headers: Record<string, string> = { apikey: key, "x-upsert": "true" };
     if (session.session) headers["authorization"] = `Bearer ${session.session.access_token}`;
     setUploading(true);
@@ -123,14 +135,19 @@ export function SourcePanel({ roomId, onPick }: Props) {
     setProgress(0);
     const started = Date.now();
     const upload = new tus.Upload(file, {
-      endpoint: `${import.meta.env['VITE_SUPABASE_URL'] as string}/storage/v1/upload/resumable`,
+      endpoint: `${import.meta.env["VITE_SUPABASE_URL"] as string}/storage/v1/upload/resumable`,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       headers,
       fingerprint: async () => `syncwatch:${path}`,
       uploadDataDuringCreation: true,
       removeFingerprintOnSuccess: true,
       chunkSize: 6 * 1024 * 1024,
-      metadata: { bucketName: "room-videos", objectName: path, contentType: mime, cacheControl: "3600" },
+      metadata: {
+        bucketName: "room-videos",
+        objectName: path,
+        contentType: mime,
+        cacheControl: "3600",
+      },
       onProgress: (sent, total) => {
         setProgress(Math.round((sent / total) * 100));
         const secs = (Date.now() - started) / 1000;
@@ -139,14 +156,14 @@ export function SourcePanel({ roomId, onPick }: Props) {
       onError: () => {
         setUploading(false);
         uploadRef.current = null;
-        toast.error("Upload stopped. Pick the same file again to continue where it left off.");
+        toast.error(t("uploadStopped"));
       },
       onSuccess: () => {
         setUploading(false);
         uploadRef.current = null;
         onPick("upload", path, file.name);
         void loadLibrary();
-        toast.success("Upload ready — everyone streams from this file.");
+        toast.success(t("uploadReady"));
       },
     });
     uploadRef.current = upload;
@@ -154,27 +171,34 @@ export function SourcePanel({ roomId, onPick }: Props) {
       const previous = await upload.findPreviousUploads();
       if (previous[0]) {
         upload.resumeFromPreviousUpload(previous[0]);
-        toast.message("Continuing your earlier upload…");
+        toast.message(t("continuingUpload"));
       }
       upload.start();
     } catch {
       setUploading(false);
       uploadRef.current = null;
-      toast.error("Upload could not start. Please select the file again.");
+      toast.error(t("uploadStartFailed"));
     }
   };
 
   return (
-    <Tabs defaultValue="youtube" className="rounded-xl border border-border bg-card p-3">
+    <Tabs
+      dir={lang === "fa" ? "rtl" : "ltr"}
+      defaultValue="youtube"
+      className="rounded-xl border border-border bg-card p-3"
+    >
       <TabsList className="w-full">
         <TabsTrigger value="youtube" className="flex-1">
-          YouTube
+          {" "}
+          {t("source.youtube")}
         </TabsTrigger>
         <TabsTrigger value="link" className="flex-1">
-          Paste link
+          {" "}
+          {t("tab.link")}
         </TabsTrigger>
         <TabsTrigger value="upload" className="flex-1">
-          Upload
+          {" "}
+          {t("tab.upload")}
         </TabsTrigger>
       </TabsList>
 
@@ -183,48 +207,55 @@ export function SourcePanel({ roomId, onPick }: Props) {
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search YouTube…"
+            placeholder={t("search.placeholder")}
           />
-          <Button type="submit" disabled={searching} aria-label="Search YouTube">
-            {searching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+          <Button type="submit" disabled={searching} aria-label={t("search.aria")}>
+            {searching ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Search className="size-4" />
+            )}
           </Button>
         </form>
         {results.length > 0 && (
           <div className="grid max-h-64 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
             {results.map((result) => (
-              <button
+              <Button
+                variant="ghost"
                 key={result.videoId}
                 type="button"
                 onClick={() => onPick("youtube", result.videoId, result.title)}
-                className="group overflow-hidden rounded-lg border border-border bg-surface text-left transition-colors hover:border-primary"
+                className="group h-auto flex-col items-stretch gap-0 overflow-hidden whitespace-normal rounded-lg border border-border bg-surface p-0 text-start transition-colors hover:border-primary"
               >
                 {result.thumbnail && (
                   <img src={result.thumbnail} alt="" className="aspect-video w-full object-cover" />
                 )}
                 <span className="block p-2 text-xs leading-snug line-clamp-2">{result.title}</span>
-              </button>
+              </Button>
             ))}
           </div>
         )}
         <div className="flex gap-2">
           <Input
+            dir="ltr"
             value={ytLink}
             onChange={(event) => setYtLink(event.target.value)}
-            placeholder="…or paste a YouTube link"
+            placeholder={t("ytLink.placeholder")}
           />
           <Button
             variant="secondary"
             onClick={() => {
               const id = parseYouTubeId(ytLink);
               if (!id) {
-                toast.error("That doesn't look like a YouTube link.");
+                toast.error(t("error.notYoutube"));
                 return;
               }
               onPick("youtube", id, null);
               setYtLink("");
             }}
           >
-            Load
+            {" "}
+            {t("load")}
           </Button>
         </div>
       </TabsContent>
@@ -232,21 +263,22 @@ export function SourcePanel({ roomId, onPick }: Props) {
       <TabsContent value="link" className="mt-3 space-y-2">
         <div className="flex gap-2">
           <Input
+            dir="ltr"
             value={link}
             onChange={(event) => setLink(event.target.value)}
-            placeholder="Page link, iframe embed code, Aparat, Vimeo, .mp4/.m3u8…"
+            placeholder={t("link.placeholder")}
           />
           <Button
             disabled={finding}
             onClick={async () => {
               const detected = detectSource(unwrapEmbedCode(link));
               if (!detected) {
-                toast.error("Paste a full link starting with https://");
+                toast.error(t("error.needHttps"));
                 return;
               }
               if (detected.type !== "other") {
                 onPick(detected.type, detected.ref, null);
-                toast.success(`Loaded as ${SOURCE_LABEL[detected.type]}`);
+                toast.success(t("loadedAs", { label: t(`source.${detected.type}`) }));
                 setLink("");
                 return;
               }
@@ -255,59 +287,75 @@ export function SourcePanel({ roomId, onPick }: Props) {
               try {
                 const aparat = aparatHash(new URL(detected.ref));
                 if (aparat) {
-                  const best = (await findAparatInBrowser(aparat)) ??
-                    pickAparatVideo((await runFind({ data: { url: detected.ref } }).catch(() => ({ videos: [] as FoundVideo[] }))).videos.map((v) => v.url));
+                  const best =
+                    (await findAparatInBrowser(aparat)) ??
+                    pickAparatVideo(
+                      (
+                        await runFind({ data: { url: detected.ref } }).catch(() => ({
+                          videos: [] as FoundVideo[],
+                        }))
+                      ).videos.map((v) => v.url),
+                    );
                   setLink("");
                   if (best) {
-                    onPick("file", best, "Aparat video");
-                    toast.success("Found the real Aparat video — everyone stays in sync.");
+                    onPick("file", best, t("aparat.title"));
+                    toast.success(t("aparatFound"));
                   } else {
-                    onPick("other", aparatEmbedUrl(aparat), "Aparat video");
-                    toast.message("Aparat didn't share the video file, so it plays in Aparat's own player. Press play together; sync isn't guaranteed here.");
+                    onPick("other", aparatEmbedUrl(aparat), t("aparat.title"));
+                    toast.message(t("aparatFallback"));
                   }
                   return;
                 }
                 const r = await runFind({ data: { url: detected.ref } });
                 setFound(r.videos);
                 if (r.videos.length === 0) {
-                  toast.message(r.error ?? "No controllable video found — embedding without sync.");
+                  toast.message(
+                    lang === "fa" ? t("noControllable") : (r.error ?? t("noControllable")),
+                  );
                   onPick("other", detected.ref, null);
                   setLink("");
                 }
               } catch {
-                toast.message("The page could not be checked — embedding without sync.");
+                toast.message(t("pageNotChecked"));
                 onPick("other", detected.ref, null);
               } finally {
                 setFinding(false);
               }
             }}
           >
-            {finding ? <Loader2 className="size-4 animate-spin" /> : "Load"}
+            {finding ? <Loader2 className="size-4 animate-spin" /> : t("load")}
           </Button>
         </div>
         {found.length > 0 && (
           <div className="space-y-1.5">
-            <p className="text-xs font-medium">Videos found on this page — pick one:</p>
+            <p className="text-xs font-medium"> {t("videosFound")} </p>
             {found.map((v) => (
-              <button
+              <Button
+                variant="ghost"
                 key={v.url}
                 type="button"
                 onClick={() => {
                   const d = detectSource(v.url);
-                  const type: SourceType = v.kind === "hls" || v.kind === "file" ? "file" : (d?.type ?? "other");
+                  const type: SourceType =
+                    v.kind === "hls" || v.kind === "file" ? "file" : (d?.type ?? "other");
                   onPick(type, d && type === d.type ? d.ref : v.url, null);
                   setFound([]);
                   setLink("");
                 }}
-                className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-left text-xs hover:border-primary"
+                className="flex h-auto w-full min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-start text-xs hover:border-primary"
               >
                 <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] uppercase text-accent-foreground">
-                  {v.kind === "hls" || v.kind === "file" ? "synced" : v.kind}
+                  {v.kind === "hls" || v.kind === "file"
+                    ? t("syncedChip")
+                    : t(`source.${v.kind === "embed" ? "other" : v.kind}`)}
                 </span>
-                <span className="truncate">{v.url}</span>
-              </button>
+                <span dir="ltr" className="truncate">
+                  {v.url}
+                </span>
+              </Button>
             ))}
-            <button
+            <Button
+              variant="ghost"
               type="button"
               className="text-xs text-muted-foreground underline"
               onClick={() => {
@@ -316,21 +364,24 @@ export function SourcePanel({ roomId, onPick }: Props) {
                 setLink("");
               }}
             >
-              None of these — embed the whole page instead
-            </button>
+              {" "}
+              {t("embedPageInstead")}
+            </Button>
           </div>
         )}
-        <p className="text-xs text-muted-foreground">
-          Paste the page where the movie plays — SyncWatch looks for the real video inside it so everyone stays in sync.
-        </p>
+        <p className="text-xs text-muted-foreground"> {t("linkHint")}</p>
       </TabsContent>
 
       <TabsContent value="upload" className="mt-3 space-y-3">
         {uploading ? (
           <div className="space-y-2 rounded-lg border border-border bg-surface p-3">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-medium">{paused ? "Paused" : "Uploading…"} {progress}%</span>
-              <span className="text-muted-foreground">{speed}</span>
+              <span className="font-medium">
+                {paused ? t("paused") : t("uploading")} {progress}%
+              </span>
+              <span dir="ltr" className="text-muted-foreground">
+                {speed}
+              </span>
             </div>
             <Progress value={progress} />
             <div className="flex gap-2">
@@ -344,7 +395,7 @@ export function SourcePanel({ roomId, onPick }: Props) {
                 }}
               >
                 {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
-                {paused ? "Resume" : "Pause"}
+                {paused ? t("resume") : t("aria.pause")}
               </Button>
               <Button
                 size="sm"
@@ -355,19 +406,17 @@ export function SourcePanel({ roomId, onPick }: Props) {
                   setUploading(false);
                 }}
               >
-                <X className="size-3.5" /> Cancel
+                <X className="size-3.5" /> {t("cancel")}
               </Button>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              If you leave, pick the same file again later — the upload continues where it stopped.
-            </p>
+            <p className="text-[11px] text-muted-foreground"> {t("uploadResumeHint")}</p>
           </div>
         ) : (
           <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-surface px-4 py-6 text-sm text-muted-foreground hover:border-primary">
             <span className="flex items-center gap-2 text-foreground">
-              <Upload className="size-4" /> Choose a video from your phone or computer
+              <Upload className="size-4" /> {t("chooseVideo")}
             </span>
-            <span className="text-[11px]">MP4, MOV, WebM, MKV, M4V, 3GP · up to 2 GB · resumable</span>
+            <span className="text-[11px]"> {t("uploadFormats")} </span>
             <input
               type="file"
               accept="video/*,.mp4,.mkv,.mov,.m4v,.3gp,.webm,.avi,.ts,.ogg,.ogv,.wmv,.flv,.mpeg,.mpg"
@@ -382,18 +431,19 @@ export function SourcePanel({ roomId, onPick }: Props) {
         )}
         {library.length > 0 && (
           <div className="space-y-1.5">
-            <p className="text-xs font-medium">Room library — no need to upload again</p>
+            <p className="text-xs font-medium"> {t("roomLibrary")} </p>
             <div className="max-h-40 space-y-1 overflow-y-auto">
               {library.map((item) => (
-                <button
+                <Button
+                  variant="ghost"
                   key={item.path}
                   type="button"
                   onClick={() => onPick("upload", item.path, item.label)}
-                  className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-left text-xs hover:border-primary"
+                  className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-start text-xs hover:border-primary"
                 >
                   <Film className="size-3.5 shrink-0 text-primary" />
                   <span className="truncate">{item.label}</span>
-                </button>
+                </Button>
               ))}
             </div>
           </div>

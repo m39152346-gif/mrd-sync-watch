@@ -1,3 +1,4 @@
+import { useI18n, LanguageToggle } from "@/lib/i18n";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Loader2, MonitorPlay, Popcorn, Users } from "lucide-react";
@@ -6,7 +7,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
-import { colorForToken, getSessionToken, getStoredName, setStoredName, getRecentRooms, type RecentRoom } from "@/lib/session";
+import {
+  colorForToken,
+  getSessionToken,
+  getStoredName,
+  setStoredName,
+  getRecentRooms,
+  type RecentRoom,
+} from "@/lib/session";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -40,17 +48,21 @@ function makeCode() {
 }
 
 function Landing() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
   const [recent, setRecent] = useState<RecentRoom[]>([]);
 
-  useEffect(() => { setName(getStoredName()); setRecent(getRecentRooms()); }, []);
+  useEffect(() => {
+    setName(getStoredName());
+    setRecent(getRecentRooms());
+  }, []);
 
   const requireName = () => {
     if (!name.trim()) {
-      toast.error("Add a display name first.");
+      toast.error(t("error.needName"));
       return false;
     }
     setStoredName(name.trim());
@@ -92,7 +104,7 @@ function Landing() {
       if (participantError) throw participantError;
       navigate({ to: "/room/$code", params: { code: roomCode } });
     } catch {
-      toast.error("Could not create the room. Please try again.");
+      toast.error(t("error.createRoom"));
       setBusy(null);
     }
   };
@@ -101,13 +113,13 @@ function Landing() {
     if (!requireName()) return;
     const clean = code.trim().toUpperCase();
     if (clean.length !== 6) {
-      toast.error("Room codes are 6 characters.");
+      toast.error(t("error.codeLength"));
       return;
     }
     setBusy("join");
     const { data } = await supabase.from("rooms").select("code").eq("code", clean).maybeSingle();
     if (!data) {
-      toast.error("No room with that code.");
+      toast.error(t("error.noRoom"));
       setBusy(null);
       return;
     }
@@ -117,27 +129,29 @@ function Landing() {
   return (
     <main className="bg-stage flex min-h-screen flex-col items-center px-4 py-10">
       <div className="flex w-full max-w-md flex-1 flex-col justify-center gap-8">
+        <div className="flex justify-end">
+          <LanguageToggle />
+        </div>
         <header className="space-y-3 text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
-            <Popcorn className="size-3.5 text-primary" /> Watch parties, perfectly in sync
+            <Popcorn className="size-3.5 text-primary" /> {t("app.tagline")}
           </span>
           <h1 className="text-gradient text-5xl font-bold tracking-tight">SyncWatch</h1>
-          <p className="text-sm text-muted-foreground">
-            One shared player, live chat, and a 6-character code. No account required.
-          </p>
+          <p className="text-sm text-muted-foreground"> {t("landing.subtitle")}</p>
         </header>
 
         <div className="space-y-5 rounded-2xl border border-border bg-card/80 p-5 shadow-glow backdrop-blur">
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="display-name">
-              Your display name
+              {" "}
+              {t("displayName.label")}
             </label>
             <Input
               id="display-name"
               value={name}
               maxLength={24}
               onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Sam"
+              placeholder={t("displayName.placeholder")}
             />
           </div>
 
@@ -146,12 +160,13 @@ function Landing() {
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <MonitorPlay className="size-4" />
-            )}
-            Create room
+            )}{" "}
+            {t("createRoom")}
           </Button>
 
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" /> or join <span className="h-px flex-1 bg-border" />
+            <span className="h-px flex-1 bg-border" /> {t("orJoin")}{" "}
+            <span className="h-px flex-1 bg-border" />
           </div>
 
           <div className="flex gap-2">
@@ -159,24 +174,42 @@ function Landing() {
               value={code}
               maxLength={6}
               onChange={(event) => setCode(event.target.value.toUpperCase())}
-              placeholder="ROOM CODE"
-              className="tracking-[0.3em] uppercase"
+              placeholder={t("roomCode.placeholder")}
+              aria-label={t("roomCode.placeholder")}
+              dir="ltr"
+              className="uppercase"
             />
             <Button variant="secondary" disabled={busy !== null} onClick={joinRoom}>
-              {busy === "join" ? <Loader2 className="size-4 animate-spin" /> : <Users className="size-4" />}
-              Join
+              {busy === "join" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Users className="size-4" />
+              )}{" "}
+              {t("join")}
             </Button>
           </div>
         </div>
 
-        {recent.length > 0 && <section className="space-y-2">
-          <h2 className="text-xs font-medium text-muted-foreground">Recent rooms</h2>
-          <div className="flex flex-wrap gap-2">{recent.map((room) => <Button key={room.code} asChild variant="secondary" size="sm"><Link to="/room/$code" params={{ code: room.code }}>{room.code}</Link></Button>)}</div>
-        </section>}
+        {recent.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-xs font-medium text-muted-foreground"> {t("recentRooms")} </h2>
+            <div className="flex flex-wrap gap-2">
+              {recent.map((room) => (
+                <Button key={room.code} asChild variant="secondary" size="sm">
+                  <Link dir="ltr" to="/room/$code" params={{ code: room.code }}>
+                    {room.code}
+                  </Link>
+                </Button>
+              ))}
+            </div>
+          </section>
+        )}
         <p className="text-center text-xs text-muted-foreground">
-          Want to keep your name across devices?{" "}
+          {" "}
+          {t("keepName")}{" "}
           <Link to="/auth" className="text-primary underline-offset-2 hover:underline">
-            Create an account
+            {" "}
+            {t("createAccount")}
           </Link>
         </p>
       </div>

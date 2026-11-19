@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ type Props = {
 };
 
 export function ChatPanel({ roomId, displayName, color }: Props) {
+  const { t, lang } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -40,7 +42,9 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
     typingChannel.current = channel;
     const sweep = setInterval(() => {
       setTyping((t) => {
-        const next = Object.fromEntries(Object.entries(t).filter(([, at]) => Date.now() - at < 3500));
+        const next = Object.fromEntries(
+          Object.entries(t).filter(([, at]) => Date.now() - at < 3500),
+        );
         return Object.keys(next).length === Object.keys(t).length ? t : next;
       });
     }, 1000);
@@ -53,7 +57,11 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
   const notifyTyping = () => {
     if (Date.now() - lastTypingSent.current < 2000) return;
     lastTypingSent.current = Date.now();
-    void typingChannel.current?.send({ type: "broadcast", event: "typing", payload: { name: displayName } });
+    void typingChannel.current?.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { name: displayName },
+    });
   };
   const typers = Object.keys(typing);
 
@@ -103,16 +111,16 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
       .insert({ room_id: roomId, display_name: displayName, color, body: body.slice(0, 2000) });
     if (error) {
       setDraft(body);
-      toast.error("Message not sent. Check your connection and try again.");
+      toast.error(t("chat.sendFailed"));
     }
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card">
-      <div className="border-b border-border px-3 py-2 text-sm font-semibold">Chat</div>
+      <div className="border-b border-border px-3 py-2 text-sm font-semibold"> {t("chat")} </div>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {messages.length === 0 && (
-          <p className="text-xs text-muted-foreground">Say hi to the room 👋</p>
+          <p className="text-xs text-muted-foreground"> {t("chat.sayHi")} </p>
         )}
         {messages.map((message) => (
           <div key={message.id} className="text-sm">
@@ -121,18 +129,24 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
                 {message.display_name}
               </span>
               <span className="text-[10px] text-muted-foreground">
-                {new Date(message.created_at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {new Date(message.created_at).toLocaleTimeString(
+                  lang === "fa" ? "fa-IR" : "en-US",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  },
+                )}
               </span>
             </div>
-            <p className="break-words text-foreground/90">{message.body}</p>
+            <p dir="auto" className="break-words text-foreground/90">
+              {message.body}
+            </p>
           </div>
         ))}
       </div>
       <div className="h-5 px-3 text-[11px] italic text-muted-foreground" aria-live="polite">
-        {typers.length > 0 && `${typers.slice(0, 2).join(", ")}${typers.length > 2 ? " and others" : ""} typing…`}
+        {typers.length > 0 &&
+          `${typers.slice(0, 2).join(", ")}${typers.length > 2 ? ` ${t("chat.andOthers")}` : ""} ${t("chat.typing")}`}
       </div>
       <form onSubmit={send} className="flex gap-2 border-t border-border p-3 pt-2">
         <Input
@@ -141,10 +155,10 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
             setDraft(event.target.value);
             notifyTyping();
           }}
-          placeholder="Message the room…"
+          placeholder={t("chat.placeholder")}
           maxLength={2000}
         />
-        <Button type="submit" size="icon" aria-label="Send message">
+        <Button type="submit" size="icon" aria-label={t("chat.send")}>
           <Send className="size-4" />
         </Button>
       </form>

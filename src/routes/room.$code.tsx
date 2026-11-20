@@ -1,3 +1,4 @@
+import { Reactions } from "@/components/Reactions";
 import { useI18n, LanguageToggle } from "@/lib/i18n";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -560,6 +561,7 @@ function RoomPage() {
   const sourcePanel = <SourcePanel roomId={roomId} onPick={pickSource} />;
   const chat = <ChatPanel roomId={roomId} displayName={name} color={color} />;
   const isFs = fullscreen || pseudoFs;
+
   const tabs = [
     { id: "chat" as const, icon: MessageSquare, label: t("chat") },
     { id: "people" as const, icon: Users, label: `${t("watching")} · ${active.length || 1}` },
@@ -610,7 +612,7 @@ function RoomPage() {
             className={
               isFs
                 ? "fixed inset-0 z-50 flex flex-col justify-center gap-2 bg-media p-2"
-                : "space-y-2 bg-background px-0 lg:space-y-3 lg:bg-transparent"
+                : "relative space-y-2 bg-background px-0 lg:space-y-3 lg:bg-transparent"
             }
           >
             <div className={isFs ? "flex min-h-0 flex-1 items-center [&>*]:w-full" : ""}>
@@ -630,6 +632,7 @@ function RoomPage() {
                   {state?.source_title ? ` · ${t(`source.${sourceType}`)}` : ""}
                 </span>
               </div>
+              <div className="mb-2"><Reactions roomId={roomId} displayName={name} /></div>
               <PlaybackControls
                 isPlaying={state?.is_playing ?? false}
                 position={position}

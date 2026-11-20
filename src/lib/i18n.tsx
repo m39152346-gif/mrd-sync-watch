@@ -64,6 +64,7 @@ const en = {
   "source.upload": "Uploaded file",
   "source.other": "Embedded link",
 
+  reactions: "React",
   "chat.sayHi": "Say hi to the room 👋",
   "chat.placeholder": "Message the room…",
   "chat.send": "Send message",
@@ -215,6 +216,7 @@ const fa: Record<MessageKey, string> = {
   "source.upload": "فایل آپلودشده",
   "source.other": "پیوند جاسازی‌شده",
 
+  reactions: "واکنش",
   "chat.sayHi": "به اتاق سلام کنید 👋",
   "chat.placeholder": "پیام خود را بنویسید…",
   "chat.send": "ارسال پیام",

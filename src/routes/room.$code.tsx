@@ -1,7 +1,8 @@
 import { useI18n, LanguageToggle } from "@/lib/i18n";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Link2, Loader2, MessageSquare, X } from "lucide-react";
+import { Check, Copy, Film, Link2, Loader2, MessageSquare, Share2, Users } from "lucide-react";
+import { copyText } from "@/lib/clipboard";
 import { toast } from "sonner";
 
 import { ChatPanel } from "@/components/ChatPanel";
@@ -72,7 +73,10 @@ function RoomPage() {
   const [playerReady, setPlayerReady] = useState(0);
   const [duration, setDuration] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"chat" | "people" | "source">("chat");
+  const [isDesktop, setIsDesktop] = useState(true);
+  const [pseudoFs, setPseudoFs] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const [token, setToken] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -356,13 +360,47 @@ function RoomPage() {
   const participantsRef = useRef<Participant[]>([]);
   participantsRef.current = participants;
   const toggleFullscreen = () => {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-    else if (stageRef.current?.requestFullscreen)
-      void stageRef.current
-        .requestFullscreen()
-        .catch(() => toast.message(t("fullscreenUnavailable")));
-    else toast.message(t("fullscreenUnavailable"));
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    if (pseudoFs) {
+      setPseudoFs(false);
+      return;
+    }
+    const lockLandscape = () => {
+      const orientation = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      void orientation?.lock?.("landscape").catch(() => {});
+    };
+    const el = stageRef.current;
+    if (el?.requestFullscreen) {
+      el.requestFullscreen()
+        .then(lockLandscape)
+        .catch(() => setPseudoFs(true));
+    } else {
+      // iPhone Safari cannot fullscreen arbitrary elements: fill the screen instead.
+      setPseudoFs(true);
+    }
   };
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!pseudoFs) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setPseudoFs(false);
+    window.addEventListener("keydown", esc);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", esc);
+      document.body.style.overflow = "";
+    };
+  }, [pseudoFs]);
   useEffect(() => {
     const changed = () => setFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", changed);
@@ -398,25 +436,32 @@ function RoomPage() {
     return () => window.removeEventListener("keydown", keyboard);
   }, [state, position, duration]);
 
+  const inviteUrl = () => `${window.location.origin}/room/${code.toUpperCase()}`;
   const copyInvite = async () => {
-    const url = `${window.location.origin}/room/${code.toUpperCase()}`;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      const area = document.createElement("textarea");
-      area.value = url;
-      document.body.appendChild(area);
-      area.select();
-      const ok = document.execCommand("copy");
-      area.remove();
-      if (!ok) {
-        toast.message(`${t("shareLink")} ${url}`);
-        return;
-      }
+    const url = inviteUrl();
+    if (await copyText(url)) {
+      setCopied(true);
+      toast.success(t("inviteCopied"));
+      setTimeout(() => setCopied(false), 2000);
+      return;
     }
-    setCopied(true);
-    toast.success(t("inviteCopied"));
-    setTimeout(() => setCopied(false), 2000);
+    if (navigator.share) {
+      void navigator.share({ title: "SyncWatch", url }).catch(() => {});
+      return;
+    }
+    toast.message(`${t("shareLink")} ${url}`, { duration: 10000 });
+  };
+  const copyCode = async () => {
+    if (await copyText(code.toUpperCase())) {
+      setCodeCopied(true);
+      toast.success(t("codeCopied"));
+      setTimeout(() => setCodeCopied(false), 2000);
+    } else toast.message(code.toUpperCase());
+  };
+  const shareInvite = () => {
+    if (navigator.share)
+      void navigator.share({ title: "SyncWatch", url: inviteUrl() }).catch(() => {});
+    else void copyInvite();
   };
 
   if (loading) {
@@ -487,122 +532,169 @@ function RoomPage() {
     (participant) => Date.now() - new Date(participant.last_seen_at).getTime() < 90000,
   );
 
+  const people = (
+    <div className="rounded-xl border border-border bg-card p-3">
+      <h2 className="mb-2 text-sm font-semibold">
+        {t("watching")} · {active.length || 1}
+      </h2>
+      <ul className="space-y-2">
+        {active.map((participant) => (
+          <li key={participant.id} className="flex min-w-0 items-center gap-2 text-sm">
+            <span
+              className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-background"
+              style={{ backgroundColor: participant.color }}
+            >
+              {initials(participant.display_name) || "?"}
+            </span>
+            <span className="truncate">{participant.display_name}</span>
+            {participant.is_host && (
+              <span className="ms-auto shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground">
+                {t("host")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+  const sourcePanel = <SourcePanel roomId={roomId} onPick={pickSource} />;
+  const chat = <ChatPanel roomId={roomId} displayName={name} color={color} />;
+  const isFs = fullscreen || pseudoFs;
+  const tabs = [
+    { id: "chat" as const, icon: MessageSquare, label: t("chat") },
+    { id: "people" as const, icon: Users, label: `${t("watching")} · ${active.length || 1}` },
+    { id: "source" as const, icon: Film, label: t("tab.source") },
+  ];
+
   return (
-    <main className="bg-stage min-h-screen px-3 py-4 lg:px-6">
-      <header className="mx-auto mb-4 flex max-w-7xl flex-wrap items-center gap-3">
-        <Link to="/" className="text-gradient text-xl font-bold">
+    <main className="bg-stage flex h-[100dvh] flex-col overflow-hidden lg:block lg:h-auto lg:min-h-screen lg:overflow-visible lg:px-6 lg:py-4">
+      <header className="mx-auto flex w-full max-w-7xl shrink-0 items-center gap-2 px-3 py-2 lg:mb-4 lg:px-0 lg:py-0">
+        <Link to="/" className="text-gradient shrink-0 text-lg font-bold lg:text-xl">
           SyncWatch
         </Link>
-        <span
+        <button
+          type="button"
           dir="ltr"
-          className="rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-sm "
+          onClick={copyCode}
+          aria-label={t("copyCode")}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 font-mono text-sm transition-colors hover:border-primary"
         >
           {code.toUpperCase()}
-        </span>
-        <Button variant="secondary" size="sm" onClick={copyInvite}>
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />} {t("copyInvite")}
+          {codeCopied ? (
+            <Check className="size-3.5 text-primary" />
+          ) : (
+            <Copy className="size-3.5 text-muted-foreground" />
+          )}
+        </button>
+        <Button variant="secondary" size="sm" className="hidden sm:inline-flex" onClick={copyInvite}>
+          {copied ? <Check className="size-4" /> : <Link2 className="size-4" />} {t("copyInvite")}
         </Button>
         <Button
-          variant="ghost"
-          size="sm"
-          className="ms-auto lg:hidden"
-          onClick={() => {
-            setChatOpen((open) => {
-              if (!open)
-                setTimeout(
-                  () =>
-                    document.getElementById("room-sidebar")?.scrollIntoView({ behavior: "smooth" }),
-                  50,
-                );
-              return !open;
-            });
-          }}
+          variant="secondary"
+          size="icon"
+          className="size-8 sm:hidden"
+          aria-label={t("copyInvite")}
+          onClick={shareInvite}
         >
-          {chatOpen ? <X className="size-4" /> : <MessageSquare className="size-4" />}
-          {chatOpen ? t("hideChat") : t("chat")}
+          <Share2 className="size-4" />
         </Button>
-        <LanguageToggle />
+        <div className="ms-auto shrink-0">
+          <LanguageToggle />
+        </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1fr_320px]">
-        <section className="min-w-0 space-y-3">
+      <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-4">
+        <section className="shrink-0 lg:min-w-0 lg:space-y-3">
           <div
             ref={stageRef}
-            className="space-y-3 bg-background [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:justify-center [&:fullscreen]:p-3"
+            className={
+              isFs
+                ? "fixed inset-0 z-50 flex flex-col justify-center gap-2 bg-media p-2"
+                : "space-y-2 bg-background px-0 lg:space-y-3 lg:bg-transparent"
+            }
           >
-            <VideoStage
-              handleRef={playerRef}
-              sourceType={sourceType}
-              sourceRef={state?.source_ref ?? null}
-              onLocalPlayPause={onLocalPlayPause}
-              onReady={() => setPlayerReady((n) => n + 1)}
-            />
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Link2 className="size-3.5" />
-              <span className="truncate">
-                {state?.source_title ?? t(`source.${sourceType}`)}
-                {state?.source_title ? ` · ${t(`source.${sourceType}`)}` : ""}
-              </span>
+            <div className={isFs ? "flex min-h-0 flex-1 items-center [&>*]:w-full" : ""}>
+              <VideoStage
+                handleRef={playerRef}
+                sourceType={sourceType}
+                sourceRef={state?.source_ref ?? null}
+                onLocalPlayPause={onLocalPlayPause}
+                onReady={() => setPlayerReady((n) => n + 1)}
+              />
             </div>
-            <PlaybackControls
-              isPlaying={state?.is_playing ?? false}
-              position={position}
-              duration={duration}
-              disabled={sourceType === "none" || sourceType === "other"}
-              onTogglePlay={togglePlay}
-              onSeek={handleSeek}
-              onVolume={(volume) => playerRef.current?.setVolume(volume)}
-              fullscreen={fullscreen}
-              syncStatus={
-                sourceType === "none" || sourceType === "other"
-                  ? "off"
-                  : connected && !syncing
-                    ? "synced"
-                    : "syncing"
-              }
-              onFullscreen={toggleFullscreen}
-              onSyncAll={() =>
-                void publish({
-                  position_seconds: playerRef.current?.getTime() ?? 0,
-                  is_playing: state?.is_playing ?? false,
-                })
-              }
-            />
+            <div className="px-3 lg:px-0">
+              <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <Link2 className="size-3.5 shrink-0" />
+                <span className="truncate">
+                  {state?.source_title ?? t(`source.${sourceType}`)}
+                  {state?.source_title ? ` · ${t(`source.${sourceType}`)}` : ""}
+                </span>
+              </div>
+              <PlaybackControls
+                isPlaying={state?.is_playing ?? false}
+                position={position}
+                duration={duration}
+                disabled={sourceType === "none" || sourceType === "other"}
+                onTogglePlay={togglePlay}
+                onSeek={handleSeek}
+                onVolume={(volume) => playerRef.current?.setVolume(volume)}
+                fullscreen={isFs}
+                syncStatus={
+                  sourceType === "none" || sourceType === "other"
+                    ? "off"
+                    : connected && !syncing
+                      ? "synced"
+                      : "syncing"
+                }
+                onFullscreen={toggleFullscreen}
+                onSyncAll={() =>
+                  void publish({
+                    position_seconds: playerRef.current?.getTime() ?? 0,
+                    is_playing: state?.is_playing ?? false,
+                  })
+                }
+              />
+            </div>
           </div>
-          <SourcePanel roomId={roomId} onPick={pickSource} />
+          {isDesktop && sourcePanel}
         </section>
 
-        <aside
-          id="room-sidebar"
-          className={`flex flex-col gap-3 lg:h-[calc(100vh-7rem)] ${chatOpen ? "" : "hidden lg:flex"}`}
-        >
-          <div className="rounded-xl border border-border bg-card p-3">
-            <h2 className="mb-2 text-sm font-semibold">
-              {t("watching")} · {active.length || 1}
-            </h2>
-            <ul className="space-y-2">
-              {active.map((participant) => (
-                <li key={participant.id} className="flex items-center gap-2 text-sm">
-                  <span
-                    className="flex size-7 items-center justify-center rounded-full text-[11px] font-bold text-background"
-                    style={{ backgroundColor: participant.color }}
-                  >
-                    {initials(participant.display_name) || "?"}
-                  </span>
-                  <span className="truncate">{participant.display_name}</span>
-                  {participant.is_host && (
-                    <span className="ms-auto rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground">
-                      {" "}
-                      {t("host")}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="flex min-h-80 flex-1 flex-col lg:min-h-0">
-            <ChatPanel roomId={roomId} displayName={name} color={color} />
-          </div>
+        {!isDesktop && (
+          <nav className="mx-3 mt-2 grid shrink-0 grid-cols-3 gap-1 rounded-xl border border-border bg-card p-1">
+            {tabs.map(({ id, icon: Icon, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setMobileTab(id)}
+                aria-pressed={mobileTab === id}
+                className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
+                  mobileTab === id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Icon className="size-4 shrink-0" />
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+          </nav>
+        )}
+
+        <aside className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:h-[calc(100vh-7rem)] lg:p-0">
+          {isDesktop ? (
+            <>
+              {people}
+              <div className="flex min-h-0 flex-1 flex-col">{chat}</div>
+            </>
+          ) : (
+            <>
+              <div className={mobileTab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                {chat}
+              </div>
+              {mobileTab === "people" && <div className="overflow-y-auto">{people}</div>}
+              {mobileTab === "source" && <div className="min-h-0 overflow-y-auto">{sourcePanel}</div>}
+            </>
+          )}
         </aside>
       </div>
     </main>

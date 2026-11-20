@@ -5,4 +5,5 @@
 - [x] Improve synchronization, late rejoin and idle-room playback.
 - [x] Complete player controls, fullscreen and recent rooms.
 - [ ] Validate Aparat extraction on a real video (blocked: Aparat unreachable from the test server; needs a real-device check).
+- [x] Mobile room redesign: video and chat side by side, fullscreen fallback, room code copy.
 - [x] Run automated rules and two-viewer desktop/mobile checks.

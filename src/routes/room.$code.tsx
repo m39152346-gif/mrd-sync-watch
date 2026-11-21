@@ -77,9 +77,23 @@ function RoomPage() {
   const [mobileTab, setMobileTab] = useState<"chat" | "people" | "source">("chat");
   const [isDesktop, setIsDesktop] = useState(true);
   const [pseudoFs, setPseudoFs] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [controlsShown, setControlsShown] = useState(true);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Like pro players: in fullscreen, controls fade after 3s without touch/mouse activity.
+  const wakeControls = useCallback(() => {
+    setControlsShown(true);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setControlsShown(false), 3000);
+  }, []);
+  useEffect(() => {
+    if (fullscreen || pseudoFs) wakeControls();
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, [fullscreen, pseudoFs, state?.is_playing, wakeControls]);
   const [codeCopied, setCodeCopied] = useState(false);
   const [token, setToken] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -561,6 +575,7 @@ function RoomPage() {
   const sourcePanel = <SourcePanel roomId={roomId} onPick={pickSource} />;
   const chat = <ChatPanel roomId={roomId} displayName={name} color={color} />;
   const isFs = fullscreen || pseudoFs;
+  const hideControls = isFs && !controlsShown && (state?.is_playing ?? false);
 
   const tabs = [
     { id: "chat" as const, icon: MessageSquare, label: t("chat") },
@@ -611,10 +626,21 @@ function RoomPage() {
             ref={stageRef}
             className={
               isFs
-                ? "fixed inset-0 z-50 flex flex-col justify-center gap-2 bg-media p-2"
+                ? `fixed inset-0 z-50 flex flex-col justify-center bg-media ${hideControls ? "cursor-none" : ""}`
                 : "relative space-y-2 bg-background px-0 lg:space-y-3 lg:bg-transparent"
             }
+            onPointerMove={isFs ? wakeControls : undefined}
+            onPointerDown={isFs ? wakeControls : undefined}
+            onKeyDown={isFs ? wakeControls : undefined}
           >
+            {hideControls && (
+              <button
+                type="button"
+                aria-label={t("showControls")}
+                className="absolute inset-0 z-20 cursor-none"
+                onClick={wakeControls}
+              />
+            )}
             <div className={isFs ? "flex min-h-0 flex-1 items-center [&>*]:w-full" : ""}>
               <VideoStage
                 handleRef={playerRef}
@@ -624,7 +650,13 @@ function RoomPage() {
                 onReady={() => setPlayerReady((n) => n + 1)}
               />
             </div>
-            <div className="px-3 lg:px-0">
+            <div
+              className={
+                isFs
+                  ? `absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-media via-media/80 to-transparent px-3 pb-3 pt-10 transition-opacity duration-300 ${hideControls ? "pointer-events-none opacity-0" : "opacity-100"}`
+                  : "px-3 lg:px-0"
+              }
+            >
               <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
                 <Link2 className="size-3.5 shrink-0" />
                 <span className="truncate">

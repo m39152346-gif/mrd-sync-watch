@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
+import { createRoomClient } from "@/lib/room-access";
 import {
   colorForToken,
   getSessionToken,
@@ -72,19 +73,16 @@ function Landing() {
   const createRoom = async () => {
     if (!requireName()) return;
     setBusy("create");
-    const token = getSessionToken();
+    const client = createRoomClient();
     try {
       let roomCode = makeCode();
       let roomId: string | null = null;
       for (let attempt = 0; attempt < 4 && !roomId; attempt++) {
-        const { data, error } = await supabase
-          .from("rooms")
-          .insert({ code: roomCode, host_session: token })
-          .select("id, code")
-          .single();
+        const { data, error } = await client.rpc("sw_create", { _code: roomCode, _name: name.trim() });
         if (data) {
-          roomId = data.id;
-          roomCode = data.code;
+          const created = data as { room_id: string; code: string };
+          roomId = created.room_id;
+          roomCode = created.code;
         } else if (error?.code === "23505") {
           roomCode = makeCode();
         } else if (error) {
@@ -92,16 +90,6 @@ function Landing() {
         }
       }
       if (!roomId) throw new Error("no room");
-      const { error: stateError } = await supabase.from("player_state").insert({ room_id: roomId });
-      if (stateError) throw stateError;
-      const { error: participantError } = await supabase.from("participants").insert({
-        room_id: roomId,
-        session_token: token,
-        display_name: name.trim(),
-        color: colorForToken(token),
-        is_host: true,
-      });
-      if (participantError) throw participantError;
       navigate({ to: "/room/$code", params: { code: roomCode } });
     } catch {
       toast.error(t("error.createRoom"));

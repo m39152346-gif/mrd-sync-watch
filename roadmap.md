@@ -1,4 +1,7 @@
 # SyncWatch next version
+- [ ] Secure guest room access, approval/rejection and persistent approved re-entry.
+- [ ] Restrict chat, playback, viewers and uploads to approved room members.
+- [ ] Verify approved/unapproved/outsider flows with multiple viewers; resolve only the four selected findings.
 - [x] Complete Persian translations, language switching and right-to-left layout across all screens.
 - [x] Verify Persian guest room, chat, uploads, player controls and language persistence on mobile and desktop.
 - [x] Complete resumable uploads and persistent room library.

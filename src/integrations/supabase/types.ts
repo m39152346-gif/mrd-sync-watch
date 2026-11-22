@@ -51,6 +51,7 @@ export type Database = {
       }
       participants: {
         Row: {
+          admission_status: string
           color: string
           created_at: string
           display_name: string
@@ -62,6 +63,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          admission_status?: string
           color?: string
           created_at?: string
           display_name: string
@@ -73,6 +75,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          admission_status?: string
           color?: string
           created_at?: string
           display_name?: string
@@ -152,6 +155,62 @@ export type Database = {
         }
         Relationships: []
       }
+      room_access_credentials: {
+        Row: {
+          key_hash: string
+          participant_id: string
+          room_id: string
+        }
+        Insert: {
+          key_hash: string
+          participant_id: string
+          room_id: string
+        }
+        Update: {
+          key_hash?: string
+          participant_id?: string
+          room_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_access_credentials_participant_id_fkey"
+            columns: ["participant_id"]
+            isOneToOne: true
+            referencedRelation: "participants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_access_credentials_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      room_event_credentials: {
+        Row: {
+          room_id: string
+          topic: string
+        }
+        Insert: {
+          room_id: string
+          topic?: string
+        }
+        Update: {
+          room_id?: string
+          topic?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_event_credentials_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: true
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rooms: {
         Row: {
           code: string
@@ -178,7 +237,25 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      sw_create: { Args: { _code: string; _name: string }; Returns: Json }
+      sw_enter: { Args: { _code: string; _name: string }; Returns: Json }
+      sw_heartbeat: {
+        Args: { _leaving?: boolean; _position?: number; _room: string }
+        Returns: undefined
+      }
+      sw_key_hash: { Args: never; Returns: string }
+      sw_member_id: { Args: { _room: string }; Returns: string }
+      sw_message: { Args: { _body: string; _room: string }; Returns: undefined }
+      sw_playback: { Args: { _patch: Json; _room: string }; Returns: Json }
+      sw_review: {
+        Args: { _approve: boolean; _participant: string; _room: string }
+        Returns: undefined
+      }
+      sw_snapshot: { Args: { _code: string }; Returns: Json }
+      sw_storage_access: {
+        Args: { _path: string; _write?: boolean }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

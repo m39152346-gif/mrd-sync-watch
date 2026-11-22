@@ -14,3 +14,6 @@
 - Read guest browser identity in effects or handlers, never during SSR rendering, to prevent hydration mismatches.
 - Video page discovery uses a bounded public fetch with DNS checks and no redirects; do not introduce a media proxy or bypass provider protections.
 - Keep user-facing translations in the shared i18n dictionary; switch language without remounting players or room connections, and keep URLs, codes and playback timelines left-to-right for readability.
+- Authorize guest room operations with fresh browser capabilities hashed in inaccessible credential tables; database functions validate membership and project safe fields, so legacy exposed identifiers never authenticate.
+- Keep one scoped browser client per room and separate capability-scoped Realtime topics per feature; database doorbells contain no private data, and periodic reads recover missed events without remounting players.
+- Restrict room uploads by approved room membership and uploader subfolder; member reads support the shared library while writes cannot overwrite another viewer's files.

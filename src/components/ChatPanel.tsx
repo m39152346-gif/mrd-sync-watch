@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { supabase } from "@/integrations/supabase/client";
+import type { RoomClient } from "@/lib/room-access";
 
 type Message = {
   id: string;
@@ -17,22 +17,27 @@ type Message = {
 
 type Props = {
   roomId: string;
+  client: RoomClient;
+  /** Private room topic; typing broadcasts stay inside it. */
+  topic: string;
+  /** Increments on each room doorbell, triggering a re-read. */
+  bell: number;
   displayName: string;
-  color: string;
 };
 
-export function ChatPanel({ roomId, displayName, color }: Props) {
+export function ChatPanel({ roomId, client, topic, bell, displayName }: Props) {
   const { t, lang } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const [typing, setTyping] = useState<Record<string, number>>({});
-  const typingChannel = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const typingChannel = useRef<ReturnType<RoomClient["channel"]> | null>(null);
   const lastTypingSent = useRef(0);
 
   useEffect(() => {
-    const channel = supabase
-      .channel(`typing:${roomId}`)
+    if (!topic) return;
+    const channel = client
+      .channel(`${topic}:typing`)
       .on("broadcast", { event: "typing" }, ({ payload }) => {
         const who = String((payload as { name?: string }).name ?? "");
         if (!who || who === displayName) return;
@@ -50,9 +55,9 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
     }, 1000);
     return () => {
       clearInterval(sweep);
-      supabase.removeChannel(channel);
+      void client.removeChannel(channel);
     };
-  }, [roomId, displayName]);
+  }, [client, topic, displayName]);
 
   const notifyTyping = () => {
     if (Date.now() - lastTypingSent.current < 2000) return;
@@ -67,7 +72,7 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
 
   useEffect(() => {
     let active = true;
-    supabase
+    void client
       .from("messages")
       .select("id, display_name, color, body, created_at")
       .eq("room_id", roomId)
@@ -76,26 +81,10 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
       .then(({ data }) => {
         if (active && data) setMessages(data.reverse() as Message[]);
       });
-
-    const channel = supabase
-      .channel(`chat:${roomId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` },
-        (payload) => {
-          const message = payload.new as Message;
-          setMessages((current) =>
-            current.some((item) => item.id === message.id) ? current : [...current, message],
-          );
-        },
-      )
-      .subscribe();
-
     return () => {
       active = false;
-      supabase.removeChannel(channel);
     };
-  }, [roomId]);
+  }, [client, roomId, bell]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -106,9 +95,7 @@ export function ChatPanel({ roomId, displayName, color }: Props) {
     const body = draft.trim();
     if (!body) return;
     setDraft("");
-    const { error } = await supabase
-      .from("messages")
-      .insert({ room_id: roomId, display_name: displayName, color, body: body.slice(0, 2000) });
+    const { error } = await client.rpc("sw_message", { _room: roomId, _body: body.slice(0, 2000) });
     if (error) {
       setDraft(body);
       toast.error(t("chat.sendFailed"));

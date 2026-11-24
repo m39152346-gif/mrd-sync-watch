@@ -12,10 +12,15 @@ import { SourcePanel } from "@/components/SourcePanel";
 import { VideoStage, type PlayerHandle } from "@/components/VideoStage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { supabase } from "@/integrations/supabase/client";
 import {
-  colorForToken,
-  getSessionToken,
+  createRoomClient,
+  roomSnapshot,
+  type AdmissionRequest,
+  type RoomClient,
+  type RoomParticipant,
+  type RoomSnapshot,
+} from "@/lib/room-access";
+import {
   getStoredName,
   initials,
   setStoredName,
@@ -48,14 +53,7 @@ export const Route = createFileRoute("/room/$code")({
   component: RoomPage,
 });
 
-type Participant = {
-  id: string;
-  session_token: string;
-  display_name: string;
-  color: string;
-  is_host: boolean;
-  last_seen_at: string;
-};
+type Participant = RoomParticipant;
 
 const SYNC_TOLERANCE = 0.6;
 
@@ -64,11 +62,17 @@ function RoomPage() {
   const { code } = Route.useParams();
   const navigate = useNavigate();
 
-  const [roomId, setRoomId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [client, setClient] = useState<RoomClient | null>(null);
+  const [snap, setSnap] = useState<RoomSnapshot | null>(null);
+  const [entering, setEntering] = useState(false);
+  const [bell, setBell] = useState(0);
+  const roomId = snap?.status === "approved" ? (snap.room_id ?? null) : null;
+  const memberId = snap?.member_id ?? "";
+  const topic = snap?.topic ?? "";
   const [name, setName] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [requests, setRequests] = useState<AdmissionRequest[]>([]);
   const [state, setState] = useState<PlayerState | null>(null);
   const [position, setPosition] = useState(0);
   const [playerReady, setPlayerReady] = useState(0);
@@ -93,7 +97,6 @@ function RoomPage() {
     };
   }, [fullscreen, pseudoFs, state?.is_playing, wakeControls]);
   const [codeCopied, setCodeCopied] = useState(false);
-  const [token, setToken] = useState("");
   const [connected, setConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -104,176 +107,150 @@ function RoomPage() {
   const applyingRef = useRef(false);
   const lastSeekRef = useRef(0);
   const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const color = token ? colorForToken(token) : "#22d3ee";
+  const me = participants.find((p) => p.id === memberId);
+  const color = me?.color ?? "#22d3ee";
 
-  // Resolve the room from its code.
+  // One scoped client per room; identity lives in browser storage (read after mount).
   useEffect(() => {
-    let active = true;
-    supabase
-      .from("rooms")
-      .select("id, code")
-      .eq("code", code.toUpperCase())
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!active) return;
-        setRoomId(data?.id ?? null);
-        setLoading(false);
-      });
+    setClient(createRoomClient());
     setName(getStoredName());
-    setToken(getSessionToken());
     addRecentRoom(code.toUpperCase());
-    return () => {
-      active = false;
-    };
   }, [code]);
 
-  // Join the room as a participant, keep a heartbeat, and leave on unload.
+  /** Reads the room through the membership-checked snapshot; only approved viewers get data. */
+  const refresh = useCallback(async () => {
+    if (!client) return;
+    try {
+      const next = await roomSnapshot(client, code.toUpperCase());
+      setSnap(next);
+      if (next.status !== "approved") return;
+      setParticipants(next.participants ?? []);
+      setRequests(next.requests ?? []);
+      const incoming = next.state;
+      if (incoming) {
+        setState((current) =>
+          current &&
+          current.updated_at === incoming.updated_at &&
+          current.updated_by === incoming.updated_by
+            ? current
+            : incoming,
+        );
+      }
+    } catch {
+      setSnap((current) => current ?? { status: "missing" });
+    }
+  }, [client, code]);
+
   useEffect(() => {
-    if (!roomId || !name || !token) return;
-    let active = true;
+    void refresh();
+  }, [refresh]);
 
-    const join = async () => {
-      const { data: others } = await supabase
-        .from("participants")
-        .select("session_token")
-        .eq("room_id", roomId)
-        .neq("session_token", token)
-        .gt("last_seen_at", new Date(Date.now() - 90000).toISOString());
-      if (others?.length === 0) {
-        await supabase.from("player_state").update({ is_playing: false }).eq("room_id", roomId);
-      }
-      const { error } = await supabase.from("participants").upsert(
-        {
-          room_id: roomId,
-          session_token: token,
-          display_name: name,
-          color,
-          last_seen_at: new Date().toISOString(),
-        },
-        { onConflict: "room_id,session_token" },
-      );
-      if (error) toast.error(t("error.joinList"));
-    };
-    void join();
-
-    const heartbeat = setInterval(() => {
-      void supabase
-        .from("participants")
-        .update({ last_seen_at: new Date().toISOString() })
-        .eq("room_id", roomId)
-        .eq("session_token", token);
-    }, 25000);
-
-    const leave = () => {
-      const current = stateRef.current;
-      const otherActive = participantsRef.current.some(
-        (p) => p.session_token !== token && Date.now() - new Date(p.last_seen_at).getTime() < 90000,
-      );
-      if (!otherActive && current) {
-        void supabase
-          .from("player_state")
-          .update({
-            is_playing: false,
-            position_seconds: playerRef.current?.getTime() ?? current.position_seconds,
-          })
-          .eq("room_id", roomId);
-      }
-      void supabase.from("participants").delete().eq("room_id", roomId).eq("session_token", token);
-    };
-    window.addEventListener("beforeunload", leave);
-
-    const loadParticipants = async () => {
-      const { data } = await supabase
-        .from("participants")
-        .select("id, session_token, display_name, color, is_host, last_seen_at")
-        .eq("room_id", roomId)
-        .order("created_at", { ascending: true });
-      if (active && data) setParticipants(data as Participant[]);
-    };
-    void loadParticipants();
-
-    const channel = supabase
-      .channel(`participants:${roomId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "participants", filter: `room_id=eq.${roomId}` },
-        () => void loadParticipants(),
-      )
-      .subscribe();
-
-    return () => {
-      active = false;
-      clearInterval(heartbeat);
-      window.removeEventListener("beforeunload", leave);
-      supabase.removeChannel(channel);
-      leave();
-    };
+  // Unknown visitor with a name: ask to enter (approved re-entry is recognised by the database).
+  useEffect(() => {
+    if (!client || snap?.status !== "unknown" || !name || entering) return;
+    setEntering(true);
+    void (async () => {
+      await client.rpc("sw_enter", { _code: code.toUpperCase(), _name: name });
+      await refresh();
+      setEntering(false);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, name, token]);
+  }, [client, snap?.status, name]);
 
-  // Shared playback state + realtime subscription.
+  // Periodic reads recover missed doorbells; waiting guests poll faster.
   useEffect(() => {
-    if (!roomId) return;
-    let active = true;
-    const loadState = () =>
-      supabase
-        .from("player_state")
-        .select("*")
-        .eq("room_id", roomId)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (active && data) setState(data as PlayerState);
-        });
+    if (snap?.status !== "approved" && snap?.status !== "pending") return;
+    const timer = setInterval(() => void refresh(), snap.status === "pending" ? 3000 : 10000);
+    const visible = () => document.visibilityState === "visible" && void refresh();
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [snap?.status, refresh]);
 
-    const channel = supabase
-      .channel(`player:${roomId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "player_state", filter: `room_id=eq.${roomId}` },
-        (payload) => setState(payload.new as PlayerState),
-      )
+  // Data-free doorbell on the room's private topic.
+  useEffect(() => {
+    if (!client || !topic) return;
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    let seen = false;
+    const channel = client
+      .channel(topic)
+      .on("broadcast", { event: "changed" }, () => {
+        if (pending) return;
+        pending = setTimeout(() => {
+          pending = null;
+          setBell((n) => n + 1);
+          void refresh();
+        }, 120);
+      })
       .subscribe((status) => {
         setConnected(status === "SUBSCRIBED");
-        if (status === "SUBSCRIBED") void loadState();
+        if (status === "SUBSCRIBED") {
+          if (seen) {
+            setBell((n) => n + 1);
+            void refresh();
+          }
+          seen = true;
+        }
       });
-    void loadState();
-    const refresh = () => {
-      if (document.visibilityState === "visible") void loadState();
-    };
-    document.addEventListener("visibilitychange", refresh);
-
     return () => {
-      active = false;
-      supabase.removeChannel(channel);
-      document.removeEventListener("visibilitychange", refresh);
+      if (pending) clearTimeout(pending);
+      void client.removeChannel(channel);
     };
-  }, [roomId]);
+  }, [client, topic, refresh]);
 
-  /** Writes the shared state; every participant may control playback in this MVP. */
+  // Presence heartbeat; leaving pauses playback only when the room becomes empty.
+  useEffect(() => {
+    if (!client || !roomId) return;
+    void client.rpc("sw_heartbeat", { _room: roomId, _leaving: false });
+    const heartbeat = setInterval(() => {
+      void client.rpc("sw_heartbeat", { _room: roomId, _leaving: false });
+    }, 25000);
+    const leave = () => {
+      const pos = playerRef.current?.getTime() ?? stateRef.current?.position_seconds ?? 0;
+      void client.rpc("sw_heartbeat", { _room: roomId, _leaving: true, _position: pos });
+    };
+    window.addEventListener("pagehide", leave);
+    return () => {
+      clearInterval(heartbeat);
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [client, roomId]);
+
+  const review = async (participant: string, approve: boolean) => {
+    if (!client || !roomId) return;
+    setRequests((list) => list.filter((r) => r.id !== participant));
+    const { error } = await client.rpc("sw_review", {
+      _room: roomId,
+      _participant: participant,
+      _approve: approve,
+    });
+    if (error) toast.error(t("error.sync"));
+    void refresh();
+  };
+
+  /** Writes the shared state; every approved participant may control playback. */
   const publish = useCallback(
     async (patch: Partial<PlayerState>) => {
-      if (!roomId) return;
-      const next = {
-        ...patch,
-        updated_at: new Date().toISOString(),
-        updated_by: token,
-      };
+      if (!roomId || !client) return;
       setSyncing(true);
       const sent = Date.now();
-      const { data, error } = await supabase
-        .from("player_state")
-        .update(next)
-        .eq("room_id", roomId)
-        .select("*")
-        .single();
+      const { data, error } = await client.rpc("sw_playback", {
+        _room: roomId,
+        _patch: patch as never,
+      });
       setSyncing(false);
-      if (error) toast.error(t("error.sync"));
-      else if (data) {
-        learnClockOffset(data.updated_at, sent, Date.now());
-        setState(data as PlayerState);
+      if (error || !data) {
+        toast.error(t("error.sync"));
+        return;
       }
+      const row = data as unknown as PlayerState;
+      learnClockOffset(row.updated_at, sent, Date.now());
+      setState(row);
     },
-    [roomId, token],
+    [roomId, client, t],
   );
 
   // Reconcile the local player whenever the shared state changes, and again
@@ -284,7 +261,7 @@ function RoomPage() {
     if (!state || !player?.controllable) return;
 
     const target = expectedPosition(state);
-    const own = state.updated_by === token;
+    const own = state.updated_by === memberId;
     applyingRef.current = true;
     // Never re-seek our own update (avoids rebuffer loops); others: only on a real jump.
     if (!own && Math.abs(player.getTime() - target) > 1.5) {
@@ -298,7 +275,7 @@ function RoomPage() {
       applyingRef.current = false;
     }, 350);
     return () => clearTimeout(timer);
-  }, [state, token, playerReady]);
+  }, [state, memberId, playerReady]);
 
   // Drift correction while playing + UI ticker.
   useEffect(() => {
@@ -372,8 +349,6 @@ function RoomPage() {
     void publish({ is_playing: playing, position_seconds: pos });
   };
 
-  const participantsRef = useRef<Participant[]>([]);
-  participantsRef.current = participants;
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {});
@@ -479,7 +454,8 @@ function RoomPage() {
     else void copyInvite();
   };
 
-  if (loading) {
+  const status = snap?.status;
+  if (!snap || (status === "unknown" && name) || entering) {
     return (
       <main className="flex min-h-screen items-center justify-center">
         <Loader2 className="size-6 animate-spin text-primary" />
@@ -487,22 +463,37 @@ function RoomPage() {
     );
   }
 
-  if (!roomId) {
+  if (status === "missing" || status === "legacy" || status === "rejected" || status === "pending") {
+    const title =
+      status === "missing"
+        ? t("roomNotFound", { code: code.toUpperCase() })
+        : status === "legacy"
+          ? t("legacyRoom")
+          : status === "rejected"
+            ? t("entryRejected")
+            : t("waitingApproval");
+    const hint =
+      status === "missing"
+        ? t("roomNotFoundHint")
+        : status === "legacy"
+          ? t("legacyRoomHint")
+          : status === "rejected"
+            ? t("entryRejectedHint")
+            : t("waitingApprovalHint");
     return (
       <main className="bg-stage flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center">
         <LanguageToggle />
-        <h1 className="text-2xl font-semibold">
-          {t("roomNotFound", { code: code.toUpperCase() })}
-        </h1>
-        <p className="text-sm text-muted-foreground"> {t("roomNotFoundHint")} </p>
-        <Button asChild>
+        {status === "pending" && <Loader2 className="size-6 animate-spin text-primary" />}
+        <h1 className="text-2xl font-semibold">{title}</h1>
+        <p className="max-w-sm text-sm text-muted-foreground">{hint}</p>
+        <Button asChild variant={status === "pending" ? "secondary" : "default"}>
           <Link to="/"> {t("backToApp")} </Link>
         </Button>
       </main>
     );
   }
 
-  if (!name) {
+  if (status === "unknown" || !roomId) {
     return (
       <main className="bg-stage flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-card p-5 shadow-glow">
@@ -572,8 +563,34 @@ function RoomPage() {
       </ul>
     </div>
   );
-  const sourcePanel = <SourcePanel roomId={roomId} onPick={pickSource} />;
-  const chat = <ChatPanel roomId={roomId} displayName={name} color={color} />;
+  const sourcePanel = (
+    <SourcePanel roomId={roomId} memberId={memberId} client={client!} onPick={pickSource} />
+  );
+  const chat = (
+    <ChatPanel
+      roomId={roomId}
+      client={client!}
+      topic={topic}
+      bell={bell}
+      displayName={me?.display_name ?? name}
+    />
+  );
+  const requestCard = requests.length > 0 && (
+    <div className="shrink-0 space-y-2 rounded-xl border border-primary/50 bg-card p-3">
+      <h2 className="text-sm font-semibold">{t("joinRequests")}</h2>
+      {requests.map((r) => (
+        <div key={r.id} className="flex items-center gap-2 text-sm">
+          <span className="min-w-0 flex-1 truncate">{r.display_name}</span>
+          <Button size="sm" onClick={() => void review(r.id, true)}>
+            {t("approve")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => void review(r.id, false)}>
+            {t("reject")}
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
   const isFs = fullscreen || pseudoFs;
   const hideControls = isFs && !controlsShown && (state?.is_playing ?? false);
 
@@ -643,6 +660,7 @@ function RoomPage() {
             )}
             <div className={isFs ? "flex min-h-0 flex-1 items-center [&>*]:w-full" : ""}>
               <VideoStage
+                client={client!}
                 handleRef={playerRef}
                 sourceType={sourceType}
                 sourceRef={state?.source_ref ?? null}
@@ -664,7 +682,7 @@ function RoomPage() {
                   {state?.source_title ? ` · ${t(`source.${sourceType}`)}` : ""}
                 </span>
               </div>
-              <div className="mb-2"><Reactions roomId={roomId} displayName={name} /></div>
+              <div className="mb-2"><Reactions client={client!} topic={topic} displayName={me?.display_name ?? name} /></div>
               <PlaybackControls
                 isPlaying={state?.is_playing ?? false}
                 position={position}
@@ -716,6 +734,7 @@ function RoomPage() {
         )}
 
         <aside className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:h-[calc(100vh-7rem)] lg:p-0">
+          {requestCard}
           {isDesktop ? (
             <>
               {people}

@@ -3,7 +3,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "reac
 import { AlertTriangle, ExternalLink, Film } from "lucide-react";
 import { toast } from "sonner";
 
-import { supabase } from "@/integrations/supabase/client";
+import type { RoomClient } from "@/lib/room-access";
 import type { SourceType } from "@/lib/sources";
 
 export type PlayerHandle = {
@@ -20,6 +20,7 @@ export type PlayerHandle = {
 };
 
 type Props = {
+  client: RoomClient;
   handleRef: Ref<PlayerHandle>;
   sourceType: SourceType;
   sourceRef: string | null;
@@ -78,7 +79,7 @@ async function waitForYouTubeApi() {
   });
 }
 
-export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause, onReady }: Props) {
+export function VideoStage({ client, handleRef, sourceType, sourceRef, onLocalPlayPause, onReady }: Props) {
   const { t } = useI18n();
   const mountRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -100,7 +101,7 @@ export function VideoStage({ handleRef, sourceType, sourceRef, onLocalPlayPause,
     }
     if (sourceType === "upload" && sourceRef) {
       setFileUrl(null);
-      supabase.storage
+      client.storage
         .from("room-videos")
         .createSignedUrl(sourceRef, 60 * 60 * 12)
         .then(({ data, error }) => {

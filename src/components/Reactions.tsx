@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import type { RoomClient } from "@/lib/room-access";
 import { useI18n } from "@/lib/i18n";
 
 export const REACTION_EMOJIS = ["❤️", "😂", "😮", "😢", "👏", "🔥"] as const;
@@ -7,10 +7,18 @@ export const REACTION_EMOJIS = ["❤️", "😂", "😮", "😢", "👏", "🔥"
 type Floating = { id: string; emoji: string; name: string; left: number };
 
 /** Live emoji reactions over the video, shared through a room broadcast channel (not stored). */
-export function Reactions({ roomId, displayName }: { roomId: string; displayName: string }) {
+export function Reactions({
+  client,
+  topic,
+  displayName,
+}: {
+  client: RoomClient;
+  topic: string;
+  displayName: string;
+}) {
   const { t } = useI18n();
   const [items, setItems] = useState<Floating[]>([]);
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const channelRef = useRef<ReturnType<RoomClient["channel"]> | null>(null);
   const lastSent = useRef(0);
 
   const show = (emoji: string, name: string) => {
@@ -20,8 +28,9 @@ export function Reactions({ roomId, displayName }: { roomId: string; displayName
   };
 
   useEffect(() => {
-    const channel = supabase
-      .channel(`reactions:${roomId}`)
+    if (!topic) return;
+    const channel = client
+      .channel(`${topic}:reactions`)
       .on("broadcast", { event: "react" }, ({ payload }) => {
         const p = payload as { emoji?: string; name?: string };
         if (p.emoji && (REACTION_EMOJIS as readonly string[]).includes(p.emoji)) {
@@ -32,9 +41,9 @@ export function Reactions({ roomId, displayName }: { roomId: string; displayName
     channelRef.current = channel;
     return () => {
       channelRef.current = null;
-      void supabase.removeChannel(channel);
+      void client.removeChannel(channel);
     };
-  }, [roomId]);
+  }, [client, topic]);
 
   const send = (emoji: string) => {
     if (Date.now() - lastSent.current < 250) return;

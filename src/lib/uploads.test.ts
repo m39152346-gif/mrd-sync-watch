@@ -16,5 +16,6 @@ describe("video upload rules", () => {
     expect(uploadPath("room-one", file)).toBe("room-one/14rs__movie.webm");
     expect(uploadPath("room-one", { ...file })).toBe(uploadPath("room-one", file));
     expect(uploadPath("room-two", file)).not.toBe(uploadPath("room-one", file));
+    expect(uploadPath("room-one/viewer-a", file)).toBe("room-one/viewer-a/14rs__movie.webm");
   });
 });

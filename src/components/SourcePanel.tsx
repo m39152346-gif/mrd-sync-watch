@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { supabase } from "@/integrations/supabase/client";
+import { getRoomKey, type RoomClient } from "@/lib/room-access";
 import { unwrapEmbedCode, detectSource, parseYouTubeId, type SourceType } from "@/lib/sources";
 import { searchYouTube, type YouTubeResult } from "@/lib/youtube.functions";
 import { findVideosInPage, type FoundVideo } from "@/lib/extract.functions";
@@ -42,10 +42,13 @@ async function findAparatInBrowser(hash: string): Promise<string | null> {
 
 type Props = {
   roomId: string;
+  /** Approved viewer id: uploads go into this viewer's own room subfolder. */
+  memberId: string;
+  client: RoomClient;
   onPick: (type: SourceType, ref: string, title: string | null) => void;
 };
 
-export function SourcePanel({ roomId, onPick }: Props) {
+export function SourcePanel({ roomId, memberId, client, onPick }: Props) {
   const { t, lang } = useI18n();
   const runSearch = useServerFn(searchYouTube);
   const runFind = useServerFn(findVideosInPage);
@@ -82,17 +85,31 @@ export function SourcePanel({ roomId, onPick }: Props) {
   const uploadRef = useRef<tus.Upload | null>(null);
 
   const loadLibrary = async () => {
-    const { data } = await supabase.storage.from("room-videos").list(roomId, {
-      limit: 50,
-      sortBy: { column: "created_at", order: "desc" },
-    });
+    const bucket = client.storage.from("room-videos");
+    const { data: folders } = await bucket.list(roomId, { limit: 100 });
+    const lists = await Promise.all(
+      (folders ?? [])
+        .filter((f) => f.id === null && f.name)
+        .map(async (folder) => {
+          const prefix = `${roomId}/${folder.name}`;
+          const { data } = await bucket.list(prefix, {
+            limit: 50,
+            sortBy: { column: "created_at", order: "desc" },
+          });
+          return (data ?? [])
+            .filter((f) => f.id && f.name && !f.name.startsWith("."))
+            .map((f) => ({
+              path: `${prefix}/${f.name}`,
+              label: f.name.split("__").slice(1).join("__") || f.name,
+              at: f.created_at ?? "",
+            }));
+        }),
+    );
     setLibrary(
-      (data ?? [])
-        .filter((f) => f.name && !f.name.startsWith("."))
-        .map((f) => ({
-          path: `${roomId}/${f.name}`,
-          label: f.name.split("__").slice(1).join("__") || f.name,
-        })),
+      lists
+        .flat()
+        .sort((x, y) => y.at.localeCompare(x.at))
+        .map(({ path, label }) => ({ path, label })),
     );
   };
   useEffect(() => {
@@ -119,17 +136,20 @@ export function SourcePanel({ roomId, onPick }: Props) {
       toast.warning(t("formatWarning"));
     }
     // Same file → same name, so a re-pick after leaving resumes instead of restarting.
-    const path = uploadPath(roomId, file);
+    const path = uploadPath(`${roomId}/${memberId}`, file);
     const existing = library.find((item) => item.path === path);
     if (existing) {
       onPick("upload", path, file.name);
       toast.success(t("alreadyUploaded"));
       return;
     }
-    const { data: session } = await supabase.auth.getSession();
     const key = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] as string;
-    const headers: Record<string, string> = { apikey: key, "x-upsert": "true" };
-    if (session.session) headers["authorization"] = `Bearer ${session.session.access_token}`;
+    // The room key proves approved membership; storage rules limit writes to our own folder.
+    const headers: Record<string, string> = {
+      apikey: key,
+      "x-upsert": "true",
+      "x-room-key": getRoomKey(),
+    };
     setUploading(true);
     setPaused(false);
     setProgress(0);

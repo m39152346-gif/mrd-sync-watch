@@ -50,6 +50,13 @@
       "when": 1795628932206,
       "tag": "0006_lock_rooms_table",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795629610024,
+      "tag": "0007_host_controls",
+      "breakpoints": true
     }
   ]
 }

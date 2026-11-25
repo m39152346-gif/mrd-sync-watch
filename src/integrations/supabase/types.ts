@@ -211,6 +211,29 @@ export type Database = {
           },
         ]
       }
+      room_owner_credentials: {
+        Row: {
+          room_id: string
+          secret_hash: string
+        }
+        Insert: {
+          room_id: string
+          secret_hash: string
+        }
+        Update: {
+          room_id?: string
+          secret_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_owner_credentials_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: true
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rooms: {
         Row: {
           code: string
@@ -237,16 +260,35 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      sw_claim_host: {
+        Args: { _code: string; _secret: string }
+        Returns: boolean
+      }
       sw_create: { Args: { _code: string; _name: string }; Returns: Json }
+      sw_delete_room: { Args: { _code: string }; Returns: boolean }
       sw_enter: { Args: { _code: string; _name: string }; Returns: Json }
       sw_heartbeat: {
         Args: { _leaving?: boolean; _position?: number; _room: string }
         Returns: undefined
       }
+      sw_hosted_rooms: { Args: { _codes: string[] }; Returns: string[] }
+      sw_is_host: { Args: { _room: string }; Returns: boolean }
       sw_key_hash: { Args: never; Returns: string }
+      sw_kick: {
+        Args: { _participant: string; _room: string }
+        Returns: undefined
+      }
       sw_member_id: { Args: { _room: string }; Returns: string }
       sw_message: { Args: { _body: string; _room: string }; Returns: undefined }
+      sw_owner_link: {
+        Args: { _room: string; _secret: string }
+        Returns: undefined
+      }
       sw_playback: { Args: { _patch: Json; _room: string }; Returns: Json }
+      sw_rebind: {
+        Args: { _key: string; _room: string; _target: string }
+        Returns: undefined
+      }
       sw_review: {
         Args: { _approve: boolean; _participant: string; _room: string }
         Returns: undefined

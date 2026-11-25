@@ -36,6 +36,13 @@
       "when": 1795381564535,
       "tag": "0004_approved_guest_room_access",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795625588708,
+      "tag": "0005_fix_room_notify",
+      "breakpoints": true
     }
   ]
 }

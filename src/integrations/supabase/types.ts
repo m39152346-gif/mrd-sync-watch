@@ -251,6 +251,7 @@ export type Database = {
         Args: { _approve: boolean; _participant: string; _room: string }
         Returns: undefined
       }
+      sw_room_exists: { Args: { _code: string }; Returns: boolean }
       sw_snapshot: { Args: { _code: string }; Returns: Json }
       sw_storage_access: {
         Args: { _path: string; _write?: boolean }

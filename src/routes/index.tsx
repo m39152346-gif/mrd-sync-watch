@@ -105,7 +105,7 @@ function Landing() {
       return;
     }
     setBusy("join");
-    const { data } = await supabase.from("rooms").select("code").eq("code", clean).maybeSingle();
+    const { data } = await supabase.rpc("sw_room_exists", { _code: clean });
     if (!data) {
       toast.error(t("error.noRoom"));
       setBusy(null);

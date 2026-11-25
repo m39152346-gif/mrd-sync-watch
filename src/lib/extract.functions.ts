@@ -59,8 +59,25 @@ async function resolveAparat(url: URL): Promise<FoundVideo[]> {
 
 /** Fetches a public web page and looks for playable video addresses inside it. */
 export const findVideosInPage = createServerFn({ method: "POST" })
-  .inputValidator((d) => z.object({ url: z.string().url().max(2000) }).parse(d))
+  .inputValidator((d) => z.object({ url: z.string().url().max(2000), roomId: z.string().uuid(), roomKey: z.string().regex(/^[a-f0-9]{64}$/) }).parse(d))
   .handler(async ({ data }): Promise<{ videos: FoundVideo[]; error: string | null }> => {
+    // Only approved members of an existing room may make the server fetch a page.
+    const { createClient } = await import("@supabase/supabase-js");
+    const key = process.env["SUPABASE_PUBLISHABLE_KEY"] ?? "";
+    const member = createClient(process.env["SUPABASE_URL"] ?? "", key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: { "x-room-key": data.roomKey },
+        fetch: (input, init) => {
+          const headers = new Headers(init?.headers);
+          if (headers.get("authorization") === `Bearer ${key}`) headers.delete("authorization");
+          headers.set("apikey", key);
+          return fetch(input, { ...init, headers });
+        },
+      },
+    });
+    const { data: memberId } = await member.rpc("sw_member_id", { _room: data.roomId });
+    if (!memberId) return { videos: [], error: "Only approved room members can scan pages." };
     const target = publicVideoUrl(data.url);
     if (!target) {
       return { videos: [], error: "That address can't be opened." };

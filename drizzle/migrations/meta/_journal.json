@@ -43,6 +43,13 @@
       "when": 1795625588708,
       "tag": "0005_fix_room_notify",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795628932206,
+      "tag": "0006_lock_rooms_table",
+      "breakpoints": true
     }
   ]
 }

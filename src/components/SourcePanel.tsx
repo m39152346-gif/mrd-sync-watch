@@ -311,7 +311,7 @@ export function SourcePanel({ roomId, memberId, client, onPick }: Props) {
                     (await findAparatInBrowser(aparat)) ??
                     pickAparatVideo(
                       (
-                        await runFind({ data: { url: detected.ref } }).catch(() => ({
+                        await runFind({ data: { url: detected.ref, roomId, roomKey: getRoomKey() } }).catch(() => ({
                           videos: [] as FoundVideo[],
                         }))
                       ).videos.map((v) => v.url),
@@ -326,7 +326,7 @@ export function SourcePanel({ roomId, memberId, client, onPick }: Props) {
                   }
                   return;
                 }
-                const r = await runFind({ data: { url: detected.ref } });
+                const r = await runFind({ data: { url: detected.ref, roomId, roomKey: getRoomKey() } });
                 setFound(r.videos);
                 if (r.videos.length === 0) {
                   toast.message(
